@@ -22,17 +22,12 @@
   </header>
   <main>
     <section class="panel" id="step-context">
-      <h2>Where should we start?</h2>
-      <p class="help">The city is a starting point, not a measurement of demand.</p>
+      <h2>What service are you exploring?</h2>
+      <p class="help">Type a keyword. Example sub-niches appear on their own. No city is asked here.</p>
       <label class="field wide"><span>Service keyword</span>
-        <input id="keyword" autocomplete="off" maxlength="80" value="plumbing" placeholder="plumbing">
+        <input id="keyword" autocomplete="off" maxlength="80" placeholder="plumbing">
       </label>
-      <div class="place-grid">
-        <label class="field"><span>City</span><input id="city" autocomplete="address-level2" maxlength="80" value="Austin"></label>
-        <label class="field"><span>State</span><input id="state" autocomplete="address-level1" maxlength="80" value="Texas"></label>
-        <label class="field"><span>Country</span><input id="country" autocomplete="country-name" maxlength="80" value="United States"></label>
-      </div>
-      <div class="actions"><button type="button" id="show-subniches">Show example sub-niches</button></div>
+      <p id="subniche-status" class="help" aria-live="polite">Type a service keyword to see example suggestions.</p>
       <div id="subniche-slot"></div>
     </section>
     <section class="panel" id="step-locations" hidden>

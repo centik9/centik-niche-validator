@@ -8,8 +8,8 @@ Version 0.1.0 is safe to run with no credentials. Live DataForSEO calls are off 
 
 The page is a four-step example. It does not call Census, USDA, NOAA, or DataForSEO.
 
-1. Type a service keyword and a starting city, state, and country. That city is context, not a demand measurement. Plumbing keywords offer three example sub-niches in a fixed suggestion order. Any other keyword is unranked: the app does not invent a best specialty.
-2. Pick a sub-niche. Fourteen example location cards appear, ordered by a fixture demand bar. The bar and the searches/competitors line use `example relative demand × 12` and `max(3, round(28 − demand / 4))`. They are not Census housing and not keyword volume. Expand a card for the sample housing, soil, and drought proxies, or for an explicit missing-coverage note. The top card is not selected for you.
+1. Type a service keyword only. City, state, and country are not collected. After a short pause, plumbing keywords show 20 example sub-niches as a leaderboard. Rank 1 has the longest illustrative bar. The scores are fixtures, not researched demand. Any other keyword stays a single unranked label. The app does not invent 20 results for it.
+2. Choosing a sub-niche loads a fixed United States example shortlist. It is not filtered by a starting city, and it is not exhaustive national coverage. Cards use a fixture demand bar. The searches/competitors line is `example relative demand × 12` and `max(3, round(28 − demand / 4))`. Those figures are not Census housing and not keyword volume. Expand a card for sample housing, soil, and drought proxies, or for a missing-coverage note. The top card is not selected for you.
 3. Choose a location. The sketch proposes a name, four pages, a headline, and a `.example` domain. Availability is not checked. Yes only stores a prototype choice. It does not create a site, buy a domain, or authorize spending.
 4. After yes, the paid check stays off. Cities in the example gazetteer can run the existing example deep check and its combined heuristic index. Counties, metros, and cities outside that gazetteer do not receive an invented score.
 

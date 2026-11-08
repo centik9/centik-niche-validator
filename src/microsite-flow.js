@@ -4,25 +4,34 @@ import { screenCandidates } from "./screen.js";
 export const FLOW_MODEL_ID = "centik-microsite-flow-v1";
 
 const PLUMBING_SUBNICHES = [
-  {
-    id: "emergency-plumbing",
-    label: "Emergency plumbing",
-    example_rank: 1,
-    note: "Example suggestion 1. This order is a teaching fixture, not a measured best niche."
-  },
-  {
-    id: "drain-cleaning",
-    label: "Drain cleaning",
-    example_rank: 2,
-    note: "Example suggestion 2. This order is a teaching fixture, not a measured best niche."
-  },
-  {
-    id: "water-heater-repair",
-    label: "Water heater repair",
-    example_rank: 3,
-    note: "Example suggestion 3. This order is a teaching fixture, not a measured best niche."
-  }
-];
+  ["emergency-plumbing", "Emergency plumbing", 96, "Urgent after-hours calls in this fixture."],
+  ["drain-cleaning", "Drain cleaning", 92, "A frequent residential service call in this fixture."],
+  ["water-heater-repair", "Water heater repair", 88, "Repair visits rather than full replacements."],
+  ["leak-detection", "Leak detection", 84, "Finding hidden supply-line leaks."],
+  ["toilet-repair", "Toilet repair", 80, "Running toilets, flappers, and fill valves."],
+  ["faucet-repair", "Faucet and fixture repair", 76, "Kitchen and bath faucet service."],
+  ["sewer-line", "Sewer line service", 72, "Main-line clogs and camera inspections."],
+  ["garbage-disposal", "Garbage disposal service", 68, "Jams, replacements, and resets."],
+  ["pipe-repair", "Pipe repair", 64, "Visible supply-pipe leaks and bursts."],
+  ["sump-pump", "Sump pump service", 60, "Basement pump checks and swaps."],
+  ["bath-remodel-plumbing", "Bathroom remodel plumbing", 56, "Rough-in and fixture moves for a remodel."],
+  ["kitchen-sink", "Kitchen sink service", 52, "Drains, traps, and supply connections."],
+  ["water-filtration", "Water filtration install", 48, "Under-sink and whole-home filter setup."],
+  ["gas-line", "Gas line plumbing", 44, "Appliance gas connectors and line checks."],
+  ["hydro-jetting", "Hydro jetting", 40, "High-pressure drain clearing."],
+  ["repipe", "Repipe consultation", 36, "Planning a whole-home pipe replacement."],
+  ["hose-bib", "Outdoor faucet service", 32, "Hose bibs and exterior spigots."],
+  ["water-softener", "Water softener service", 28, "Softener install and salt-system checks."],
+  ["backflow", "Backflow testing", 22, "Annual backflow device tests."],
+  ["tankless-water-heater", "Tankless water heater service", 16, "Tankless descaling and error codes."]
+].map(([id, label, example_strength, evidence], index) => ({
+  id,
+  label,
+  example_rank: index + 1,
+  example_strength,
+  evidence: `Illustrative example score ${example_strength}. ${evidence} Not a measured opportunity.`,
+  note: "Example score only. Not search volume, not Census data, and not a validated ranking."
+}));
 
 const LOCATIONS = [
   { id: "austin-tx", geography_type: "city", name: "Austin", state: "Texas", base: 84, example_deep_check: true },
@@ -73,7 +82,8 @@ export function suggestSubniches(keyword) {
       known_profile: true,
       profile_id: "plumbing",
       ranking_kind: "example_suggestion",
-      ranking_note: "Suggested order for the plumbing example only. It is not a measured ranking of the best niche.",
+      row_count: PLUMBING_SUBNICHES.length,
+      ranking_note: "Twenty plumbing rows in a fixed example order. Rank 1 has the longest illustrative bar. This is not researched demand and not a validated opportunity ranking. A longer list would use the same scrolling leaderboard.",
       subniches: PLUMBING_SUBNICHES,
       unranked_option: null
     };
@@ -162,16 +172,10 @@ export function reduceFlow(state, event) {
   throw new HttpError(400, "invalid_input", "Unknown flow event.");
 }
 
-function requireContext(body) {
+function requireKeyword(body) {
   const keyword = typeof body.keyword === "string" ? body.keyword.trim() : "";
-  const city = typeof body.city === "string" ? body.city.trim() : "";
-  const state = typeof body.state === "string" ? body.state.trim() : "";
-  const country = typeof body.country === "string" ? body.country.trim() : "";
   if (keyword.length < 2 || keyword.length > 80) throw new HttpError(400, "invalid_input", "Enter a service keyword of 2-80 characters.");
-  if (city.length < 2 || state.length < 2 || country.length < 2) {
-    throw new HttpError(400, "invalid_input", "City, state, and country are the starting context.");
-  }
-  return { keyword, city, state, country };
+  return { keyword };
 }
 
 function selectedSubniche(keyword, subnicheId) {
@@ -190,8 +194,15 @@ function samePlace(candidate, location) {
     && candidate.state.toLowerCase() === location.state.toLowerCase();
 }
 
+const SHORTLIST_COVERAGE = {
+  scope: "illustrative_us_sample",
+  exhaustive: false,
+  biased_by_user_location: false,
+  note: "A fixed example set of cities, counties, and metros in several states. It is not exhaustive United States coverage, and it is not ordered from a city or state you typed."
+};
+
 export async function buildShortlist(body) {
-  const context = requireContext(body);
+  const context = requireKeyword(body);
   const { suggestion, subniche } = selectedSubniche(context.keyword, body.subniche_id);
   const screen = await screenCandidates({
     mode: "sample",
@@ -213,9 +224,6 @@ export async function buildShortlist(body) {
       state: location.state,
       country: "United States",
       subniche_label: subniche.label,
-      starting_context: location.geography_type === "city"
-        && location.name.toLowerCase() === context.city.toLowerCase()
-        && location.state.toLowerCase() === context.state.toLowerCase(),
       example_relative_demand: demand.example_relative_demand,
       example_evidence: {
         label: "EXAMPLE",
@@ -257,13 +265,13 @@ export async function buildShortlist(body) {
     model_id: FLOW_MODEL_ID,
     data_origin: "example",
     example_data: true,
-    example_banner: "Example shortlist. The bars and the search-volume line are fixture numbers, not Census demand and not DataForSEO measurements.",
+    example_banner: "Example shortlist across a small United States sample. The bars and the search-volume line are fixture numbers, not Census demand and not DataForSEO measurements.",
+    coverage: SHORTLIST_COVERAGE,
     ranking_kind: suggestion.ranking_kind,
     ranking_note: suggestion.ranking_kind === "example_suggestion"
       ? "Cards are ordered by the example demand fixture for this sub-niche. The top card is not selected for you."
       : "No sub-niche profile exists, so this order is an unranked placeholder. It is not a suggested best market.",
     paid_dataforseo_called: false,
-    context_note: "The city you typed is starting context. It is not a demand measurement. A matching card is badged, and its example bar is not increased because of that.",
     context,
     subniche,
     cards
@@ -271,7 +279,7 @@ export async function buildShortlist(body) {
 }
 
 export function buildProposal(body) {
-  const context = requireContext(body);
+  const context = requireKeyword(body);
   const { subniche } = selectedSubniche(context.keyword, body.subniche_id);
   const location = LOCATIONS.find((item) => item.id === body.location_id);
   if (!location) throw new HttpError(400, "inconsistent_choice", "That location is not in the example shortlist.");
@@ -317,14 +325,14 @@ export function buildProposal(body) {
 export async function micrositeAction(body) {
   if (!body || typeof body !== "object") throw new HttpError(400, "invalid_input", "JSON object expected.");
   if (body.action === "subniches") {
-    const context = requireContext(body);
+    const context = requireKeyword(body);
     return {
       model_id: FLOW_MODEL_ID,
       data_origin: "example",
       example_data: true,
       paid_dataforseo_called: false,
       context,
-      context_note: "This city, state, and country are starting context, not a search-demand measurement.",
+      context_note: "Only the service keyword is used. No city, state, or country is required or applied.",
       ...suggestSubniches(context.keyword)
     };
   }

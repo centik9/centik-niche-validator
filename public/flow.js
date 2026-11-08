@@ -20,13 +20,8 @@ function el(tag, attrs, children) {
   return node;
 }
 
-function contextFromForm() {
-  return {
-    keyword: $("keyword").value.trim(),
-    city: $("city").value.trim(),
-    state: $("state").value.trim(),
-    country: $("country").value.trim()
-  };
+function keywordFromForm() {
+  return { keyword: $("keyword").value.trim() };
 }
 
 function invalidateDownstream() {
@@ -65,41 +60,97 @@ function paintStepper() {
   });
 }
 
+function strengthBar(score) {
+  const bar = el("div", { class: "bar segments" });
+  const filled = Math.max(0, Math.min(20, Math.round(Number(score) / 5)));
+  for (let mark = 0; mark < 20; mark += 1) bar.append(el("i", { class: mark < filled ? "on" : "" }));
+  return bar;
+}
+
 function showSubniches(report, error) {
   const slot = $("subniche-slot");
+  const status = $("subniche-status");
   slot.replaceChildren();
   if (error) {
+    status.textContent = error;
     slot.append(el("p", { class: "error" }, [error]));
     return;
   }
-  slot.append(el("p", {}, [report.context_note]));
-  slot.append(el("p", {}, [report.ranking_note]));
-  const choices = report.subniches.length ? report.subniches : [report.unranked_option];
-  choices.forEach((choice) => {
-    const card = el("article", { class: "subniche-card" });
-    const rank = choice.example_rank ? `Example suggestion ${choice.example_rank}` : "Unranked example";
-    card.append(el("p", { class: "tag tag-example" }, [rank]));
-    card.append(el("h3", {}, [choice.label]));
-    card.append(el("p", {}, [choice.note]));
-    const button = el("button", { type: "button" }, ["Use this sub-niche"]);
-    button.addEventListener("click", () => chooseSubniche(choice));
-    card.append(button);
-    slot.append(card);
+  status.textContent = report.ranking_note;
+  if (!report.known_profile) {
+    const choice = report.unranked_option;
+    const row = el("button", {
+      type: "button",
+      class: "leader-row",
+      "aria-label": `Unranked example, ${choice.label}. Not a researched list.`
+    }, [
+      el("span", { class: "rank" }, ["–"]),
+      el("span", { class: "leader-body" }, [
+        el("span", { class: "leader-label" }, [el("strong", {}, [choice.label]), el("span", { class: "leader-score" }, ["Unranked example"])]),
+        el("p", { class: "leader-evidence" }, [choice.note])
+      ])
+    ]);
+    row.addEventListener("click", () => chooseSubniche(choice));
+    slot.append(row);
+    return;
+  }
+  const list = el("ol", { class: "leaderboard" });
+  report.subniches.forEach((choice) => {
+    const item = el("li");
+    const row = el("button", {
+      type: "button",
+      class: "leader-row",
+      "aria-label": `Rank ${choice.example_rank}, ${choice.label}, illustrative example score ${choice.example_strength}`
+    }, [
+      el("span", { class: "rank" }, [String(choice.example_rank)]),
+      el("span", { class: "leader-body" }, [
+        el("span", { class: "leader-label" }, [
+          el("strong", {}, [choice.label]),
+          el("span", { class: "leader-score" }, [`Example ${choice.example_strength}`])
+        ]),
+        strengthBar(choice.example_strength),
+        el("p", { class: "leader-evidence" }, [choice.evidence])
+      ])
+    ]);
+    row.addEventListener("click", () => chooseSubniche(choice));
+    item.append(row);
+    list.append(item);
   });
+  slot.append(list);
 }
 
-async function showSubnichesFromForm() {
+let suggestTimer = null;
+let suggestRequest = 0;
+
+function scheduleSuggestions() {
   invalidateDownstream();
-  state.context = contextFromForm();
-  paintStepper();
-  try {
-    const report = await post("/api/microsite", { action: "subniches", ...state.context });
-    state.step = "subniches";
-    paintStepper();
-    showSubniches(report, "");
-  } catch (error) {
-    showSubniches(null, error.message);
+  const keyword = $("keyword").value.trim();
+  state.context = { keyword };
+  window.clearTimeout(suggestTimer);
+  const requestId = ++suggestRequest;
+  const status = $("subniche-status");
+  $("subniche-slot").replaceChildren();
+  if (!keyword) {
+    status.textContent = "Type a service keyword to see example suggestions.";
+    return;
   }
+  if (keyword.length < 2) {
+    status.textContent = "Keep typing. Example suggestions start at 2 characters.";
+    return;
+  }
+  status.textContent = "Preparing example suggestions. This is not a live market search.";
+  suggestTimer = window.setTimeout(async () => {
+    try {
+      const report = await post("/api/microsite", { action: "subniches", keyword });
+      if (requestId !== suggestRequest) return;
+      state.step = "subniches";
+      paintStepper();
+      showSubniches(report, "");
+    } catch (error) {
+      if (requestId !== suggestRequest) return;
+      showSubniches(null, error.message || "Example suggestions could not be loaded.");
+    }
+  }, 350);
 }
 
 async function chooseSubniche(choice) {
@@ -114,7 +165,7 @@ async function chooseSubniche(choice) {
   const report = await post("/api/microsite", {
     action: "shortlist",
     subniche_id: choice.id,
-    ...state.context
+    keyword: state.context.keyword
   });
   state.step = "locations";
   $("step-locations").hidden = false;
@@ -128,7 +179,7 @@ async function chooseSubniche(choice) {
 }
 
 function renderCards(report) {
-  $("location-note").textContent = `${report.example_banner} ${report.ranking_note}`;
+  $("location-note").textContent = `${report.example_banner} ${report.coverage.note} ${report.ranking_note}`;
   const root = $("location-cards");
   root.replaceChildren();
   report.cards.forEach((card) => {
@@ -138,7 +189,6 @@ function renderCards(report) {
       el("span", { class: "tag" }, [card.geography_type])
     ]);
     article.append(title);
-    if (card.starting_context) article.append(el("p", { class: "tag" }, ["Your starting context"]));
     article.append(el("p", { class: "tag tag-example" }, [card.subniche_label]));
     article.append(el("p", {}, [`Example relative demand ${card.example_relative_demand}`]));
     const bar = el("div", { class: "bar segments" });
@@ -180,7 +230,7 @@ async function chooseLocation(card) {
     action: "proposal",
     subniche_id: state.subniche.id,
     location_id: card.id,
-    ...state.context
+    keyword: state.context.keyword
   });
   state.proposal = proposal;
   state.step = "proposal";
@@ -296,15 +346,7 @@ async function runExampleCheck() {
   }
 }
 
-["keyword", "city", "state", "country"].forEach((id) => {
-  $(id).addEventListener("input", () => {
-    if (state.step !== "context") invalidateDownstream();
-    $("subniche-slot").replaceChildren();
-    paintStepper();
-  });
-});
-
-$("show-subniches").addEventListener("click", showSubnichesFromForm);
+$("keyword").addEventListener("input", scheduleSuggestions);
 paintStepper();
 
 fetch("/health").then((response) => response.json()).then((health) => {

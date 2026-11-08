@@ -46,7 +46,8 @@ test("tracked text does not contain a live credential or an innerHTML sink", () 
   const client = read("public/app.js");
   assert.equal(client.includes("innerHTML"), false);
   assert.match(client, /Withheld/);
-  assert.match(read("public/index.html"), /id="city"/);
+  assert.match(read("public/index.html"), /id="keyword"/);
+  assert.equal(read("public/index.html").includes('id="city"'), false);
   assert.match(read("src/config.js"), /0\.0\.0\.0/);
   assert.match(read("src/server.js"), /HOST/);
 });

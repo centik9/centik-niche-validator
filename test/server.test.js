@@ -48,10 +48,8 @@ test("health, static page, and example validation stay local", async () => {
     assert.equal(head.status, 200);
     const page = await fetch(`http://127.0.0.1:${port}/`);
     const html = await page.text();
-    assert.match(html, /id="city"/);
-    assert.match(html, /id="state"/);
-    assert.match(html, /id="country"/);
     assert.match(html, /id="keyword"/);
+    assert.equal(html.includes('id="city"'), false);
     assert.match(html, /Example data only/);
     const favicon = await fetch(`http://127.0.0.1:${port}/favicon.ico`);
     assert.equal(favicon.status, 204);
