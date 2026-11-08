@@ -17,6 +17,8 @@ import { parseResolveInput, parseValidateInput } from "./input.js";
 import { createLocationDirectory } from "./locations.js";
 import { createRateLimiter } from "./rate-limit.js";
 import { createRedactor } from "./redact.js";
+import { micrositeAction } from "./microsite-flow.js";
+import { screenCandidates } from "./screen.js";
 import { resolveLocation, validateNiche } from "./validator.js";
 
 const PUBLIC_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../public");
@@ -24,6 +26,7 @@ const PUBLIC_FILES = new Map([
   ["/", { file: "index.html", type: "text/html; charset=utf-8" }],
   ["/index.html", { file: "index.html", type: "text/html; charset=utf-8" }],
   ["/app.js", { file: "app.js", type: "text/javascript; charset=utf-8" }],
+  ["/flow.js", { file: "flow.js", type: "text/javascript; charset=utf-8" }],
   ["/styles.css", { file: "styles.css", type: "text/css; charset=utf-8" }]
 ]);
 
@@ -204,7 +207,7 @@ export function createApp(options = {}) {
       res.end(data);
       return;
     }
-    if (pathname !== "/api/resolve" && pathname !== "/api/validate") {
+    if (!["/api/resolve", "/api/validate", "/api/screen", "/api/microsite"].includes(pathname)) {
       send(res, 404, { error: "not_found", message: "Not found." });
       return;
     }
@@ -227,6 +230,20 @@ export function createApp(options = {}) {
       json = text ? JSON.parse(text) : null;
     } catch {
       throw new HttpError(400, "invalid_json", "Request body must be JSON.");
+    }
+    if (pathname === "/api/microsite") {
+      const report = await (options.micrositeImpl || micrositeAction)(json);
+      send(res, 200, report);
+      return;
+    }
+    if (pathname === "/api/screen") {
+      const report = await (options.screenImpl || screenCandidates)(json, {
+        fetchImpl: options.fetchImpl,
+        sampleCatalog: options.sampleCatalog,
+        extract: options.extract
+      });
+      send(res, 200, report);
+      return;
     }
     const prepared = pathname === "/api/resolve" ? parseResolveInput(json) : parseValidateInput(json);
     if (prepared.mode === "live") {

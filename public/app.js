@@ -390,6 +390,114 @@ async function loadHealth() {
   renderActions();
 }
 
+const SAMPLE_LINES = [
+  "city | Austin | Texas",
+  "city | Houston | Texas",
+  "city | Dallas | Texas",
+  "city | Springfield | Illinois",
+  "city | Springfield | Missouri",
+  "county | Travis County | Texas",
+  "county | Harris County | Texas",
+  "county | Hunt County | Texas",
+  "county | Dallas County | Texas",
+  "county | Fulton County | Georgia",
+  "metro | Austin-Round Rock-San Marcos | Texas",
+  "metro | Houston-Pasadena-The Woodlands | Texas"
+].join("\n");
+
+function parseScreenLines(text) {
+  return text.split(/\n/).map((line) => line.trim()).filter(Boolean).map((line) => {
+    const parts = line.split("|").map((part) => part.trim());
+    const candidate = { geography_type: parts[0], name: parts[1], state: parts[2] };
+    if (parts[3]) candidate.user_reported_competitor_count = Number(parts[3]);
+    return candidate;
+  });
+}
+
+function formatShare(signal) {
+  if (!signal || signal.value === null || signal.value === undefined) return statusText(signal && signal.status);
+  if (signal.unit && signal.unit.startsWith("share")) return `${statusText(signal.status)} ${(signal.value * 100).toFixed(1)}%`;
+  return `${statusText(signal.status)} ${signal.value}`;
+}
+
+function renderScreen(report, error) {
+  const root = $("screen-result");
+  root.replaceChildren();
+  if (error) root.append(el("p", { class: "error" }, [error]));
+  if (!report) return;
+  if (report.example_banner) root.append(el("p", { class: "banner" }, [report.example_banner]));
+  if (report.free_banner) root.append(el("p", { class: "banner banner-live" }, [report.free_banner]));
+  root.append(el("p", {}, [
+    `${report.profile.label}. ${report.profile.note} Paid DataForSEO called: no. This is not a probability or a revenue prediction.`
+  ]));
+  root.append(el("p", {}, [report.cross_type_rank_reason]));
+  for (const type of ["city", "county", "metro"]) {
+    const rows = report.candidates.filter((item) => item.input.geography_type === type);
+    if (!rows.length) continue;
+    root.append(el("h3", {}, [type === "city" ? "Cities" : type === "county" ? "Counties" : "Metros"]));
+    const table = el("table");
+    table.append(el("thead", {}, [el("tr", {}, ["Place", "Screen index", "Housing units", "Owner occupancy", "Older stock", "Shrink-swell", "Drought PDSI", "Deep check"].map((heading) => el("th", {}, [heading])))]));
+    const body = el("tbody");
+    rows.forEach((item) => {
+      const indexText = item.screen_index.status === "calculated"
+        ? `${item.screen_index.value} (#${item.screen_index.position_in_group} in group)`
+        : "Withheld";
+      const button = el("button", { type: "button", class: "secondary" }, [item.deep_check.allowed ? "Copy city into deep check" : "City check blocked"]);
+      button.disabled = !item.deep_check.allowed;
+      button.addEventListener("click", () => {
+        $("niche").value = item.deep_check.niche;
+        $("city").value = item.deep_check.city;
+        $("state").value = item.deep_check.state;
+        $("country").value = item.deep_check.country;
+        clearOutput();
+        $("query-heading").scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+      body.append(el("tr", {}, [
+        el("td", {}, [item.geography.census_name || item.input.name, item.geography.outcome === "matched" ? "" : ` (${item.geography.outcome})`]),
+        el("td", {}, [indexText]),
+        el("td", {}, [item.signals.housing_units.value === null ? statusText(item.signals.housing_units.status) : String(item.signals.housing_units.value)]),
+        el("td", {}, [formatShare(item.signals.owner_occupancy_rate)]),
+        el("td", {}, [formatShare(item.signals.older_housing_share)]),
+        el("td", {}, [formatShare(item.signals.high_shrink_swell_share)]),
+        el("td", {}, [item.signals.drought_pdsi.value === null || item.signals.drought_pdsi.value === undefined ? statusText(item.signals.drought_pdsi.status) : String(item.signals.drought_pdsi.value)]),
+        el("td", {}, [button])
+      ]));
+    });
+    table.append(body);
+    root.append(el("div", { class: "scroll" }, [table]));
+  }
+  const limits = el("ul");
+  (report.limitations || []).forEach((line) => limits.append(el("li", {}, [line])));
+  root.append(el("h3", {}, ["Screen limitations"]), limits);
+}
+
+async function runScreen(mode) {
+  $("screen-sample").disabled = true;
+  $("screen-free").disabled = true;
+  renderScreen(null, "");
+  try {
+    const report = await post("/api/screen", {
+      mode,
+      niche: $("screen-niche").value.trim(),
+      candidates: parseScreenLines($("screen-lines").value)
+    });
+    renderScreen(report, "");
+  } catch (error) {
+    renderScreen(null, error.message || "Screen failed.");
+  } finally {
+    $("screen-sample").disabled = false;
+    $("screen-free").disabled = false;
+  }
+}
+
+$("screen-fill").addEventListener("click", () => {
+  $("screen-lines").value = SAMPLE_LINES;
+  $("screen-niche").value = "foundation repair";
+});
+$("screen-sample").addEventListener("click", () => runScreen("sample"));
+$("screen-free").addEventListener("click", () => runScreen("free"));
+$("screen-lines").value = SAMPLE_LINES;
+
 ["niche", "city", "state", "country"].forEach((id) => {
   $(id).addEventListener("input", clearOutput);
 });

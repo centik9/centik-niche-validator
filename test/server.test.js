@@ -51,8 +51,8 @@ test("health, static page, and example validation stay local", async () => {
     assert.match(html, /id="city"/);
     assert.match(html, /id="state"/);
     assert.match(html, /id="country"/);
-    assert.match(html, /id="niche"/);
-    assert.match(html, /Fixture results are not real market measurements/);
+    assert.match(html, /id="keyword"/);
+    assert.match(html, /Example data only/);
     const favicon = await fetch(`http://127.0.0.1:${port}/favicon.ico`);
     assert.equal(favicon.status, 204);
     const missing = await fetch(`http://127.0.0.1:${port}/nope`);

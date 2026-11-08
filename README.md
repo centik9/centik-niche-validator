@@ -4,6 +4,31 @@ In-house local niche check for one keyword in one explicitly named city. It read
 
 Version 0.1.0 is safe to run with no credentials. Live DataForSEO calls are off unless the server process is started with `DATAFORSEO_LIVE=true`.
 
+## Example decision flow
+
+The page is a four-step example. It does not call Census, USDA, NOAA, or DataForSEO.
+
+1. Type a service keyword and a starting city, state, and country. That city is context, not a demand measurement. Plumbing keywords offer three example sub-niches in a fixed suggestion order. Any other keyword is unranked: the app does not invent a best specialty.
+2. Pick a sub-niche. Fourteen example location cards appear, ordered by a fixture demand bar. The bar and the searches/competitors line use `example relative demand × 12` and `max(3, round(28 − demand / 4))`. They are not Census housing and not keyword volume. Expand a card for the sample housing, soil, and drought proxies, or for an explicit missing-coverage note. The top card is not selected for you.
+3. Choose a location. The sketch proposes a name, four pages, a headline, and a `.example` domain. Availability is not checked. Yes only stores a prototype choice. It does not create a site, buy a domain, or authorize spending.
+4. After yes, the paid check stays off. Cities in the example gazetteer can run the existing example deep check and its combined heuristic index. Counties, metros, and cities outside that gazetteer do not receive an invented score.
+
+## Free pre-screen
+
+`POST /api/screen` ranks a short list of 1 to 20 US cities, counties, and metros before any DataForSEO call. The screen model is `centik-free-screen-v1`. It is not the paid heuristic index, not a probability, and not a revenue prediction.
+
+`mode` is `sample` or `free`. `sample` uses a frozen short list in `data/screen-sample.json` and does not use the network. `free` reads the bundled 2023 ACS 5-year extract in `data/acs-2023-5yr-extract.json` and, for counties only, queries USDA Soil Data Access and NOAA Climate at a Glance. Neither mode calls DataForSEO.
+
+Census figures are summary level 050 (county), 160 (place), and 310 (metro/micro) from the public table-based summary files, named with the 2024 Census Gazetteer. The Census Data API required a key when this was built, and this server has no key, so there is no live Census API call. Nine 2023 GEOIDs without a 2024 Gazetteer name were omitted. Place, county, and metro estimates are ranked only inside their own type.
+
+Housing units, owner occupancy, and the share of units built in 1979 or earlier are positions inside the submitted group. Median income is shown with weight 0. A missing estimate is not scored as zero.
+
+Soil is the share of rated SSURGO component acres whose highest representative linear extensibility in the top meter is at least 6 percent. Drought is the latest December Palmer Drought Severity Index in the 2023-2024 county series, transformed as `round(50 - 10 x PDSI)`. Freeze-thaw cycle counts are unavailable, not zero. Soil and drought apply only to counties, and only when the niche matches the foundation profile (`foundation`, `waterproofing`, `crawl space`, `pier and beam`, `slab leak`, `expansive soil`, `settlement`, `french drain`, `sump pump`, and the related phrases in `src/niche-profile.js`). Other niches keep those signals visible with weight 0.
+
+A matched city can be copied into the deep-check form. A county or metro cannot. Sending `geography_type` of `county` or `metro` to `/api/resolve` or `/api/validate` returns 400 and does not call DataForSEO. The copy step does not resolve a location and does not start a paid check. Census place names and DataForSEO city names are different directories, so the deep check still has to resolve the city.
+
+Rebuild the ACS extract with `node scripts/build-acs-extract.mjs`. That download is large and is not part of `npm test`.
+
 ## What a result is
 
 A validation report has three separate pieces:

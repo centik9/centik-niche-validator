@@ -74,8 +74,22 @@ function locationParts(raw) {
   };
 }
 
+function rejectBroadGeography(body) {
+  const type = body.geography_type;
+  if (type === undefined || type === null || type === "" || type === "city") return;
+  if (type === "county" || type === "metro") {
+    throw new HttpError(
+      400,
+      "unsupported_geography",
+      "The DataForSEO deep check accepts a city place only. A county or metro was not searched and was not treated as a city. No DataForSEO request was sent."
+    );
+  }
+  throw new HttpError(400, "invalid_geography", "geography_type must be city, county, or metro.");
+}
+
 export function parseResolveInput(raw) {
   const body = asObject(raw);
+  rejectBroadGeography(body);
   return {
     ...locationParts(body),
     mode: parseMode(body.mode)
@@ -84,6 +98,7 @@ export function parseResolveInput(raw) {
 
 export function parseValidateInput(raw) {
   const body = asObject(raw);
+  rejectBroadGeography(body);
   const niche = requiredText(body.niche, "Niche", 2, 80, NICHE);
   if (niche.split(/\s+/).length > 10) {
     throw new HttpError(400, "invalid_input", "Niche must be 10 words or fewer.");
