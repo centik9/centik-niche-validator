@@ -40,12 +40,26 @@ function invalidateDownstream() {
 }
 
 async function post(path, payload) {
-  const response = await fetch(path, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
-  });
-  const body = await response.json();
+  let response;
+  try {
+    response = await fetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+  } catch {
+    throw new Error("The preview could not be reached. Nothing was checked or purchased.");
+  }
+  const text = await response.text();
+  let body;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    throw new Error(`The preview returned an unreadable response (${response.status}). Nothing was checked or purchased.`);
+  }
+  if (!body || typeof body !== "object") {
+    throw new Error("The preview returned an unexpected response. Nothing was checked or purchased.");
+  }
   if (!response.ok) {
     const error = new Error(body.message || "Request failed.");
     error.body = body;
@@ -173,8 +187,7 @@ async function chooseSubniche(choice) {
   renderCards(report);
   $("step-locations").scrollIntoView({ behavior: "smooth", block: "start" });
   } catch (error) {
-    $("step-locations").hidden = false;
-    $("location-note").textContent = error.message || "The shortlist could not be built.";
+    $("subniche-status").textContent = error.message || "The shortlist could not be built.";
   }
 }
 
@@ -222,25 +235,29 @@ function renderCards(report) {
 }
 
 async function chooseLocation(card) {
-  state.locationId = card.id;
-  state.decision = null;
-  state.deep = null;
-  $("step-deep").hidden = true;
-  const proposal = await post("/api/microsite", {
-    action: "proposal",
-    subniche_id: state.subniche.id,
-    location_id: card.id,
-    keyword: state.context.keyword
-  });
-  state.proposal = proposal;
-  state.step = "proposal";
-  $("step-proposal").hidden = false;
-  paintStepper();
-  renderProposal(proposal);
-  document.querySelectorAll(".location-card").forEach((node, index) => {
-    node.classList.toggle("selected", index === card.position - 1);
-  });
-  $("step-proposal").scrollIntoView({ behavior: "smooth", block: "start" });
+  try {
+    state.locationId = card.id;
+    state.decision = null;
+    state.deep = null;
+    $("step-deep").hidden = true;
+    const proposal = await post("/api/microsite", {
+      action: "proposal",
+      subniche_id: state.subniche.id,
+      location_id: card.id,
+      keyword: state.context.keyword
+    });
+    state.proposal = proposal;
+    state.step = "proposal";
+    $("step-proposal").hidden = false;
+    paintStepper();
+    renderProposal(proposal);
+    document.querySelectorAll(".location-card").forEach((node, index) => {
+      node.classList.toggle("selected", index === card.position - 1);
+    });
+    $("step-proposal").scrollIntoView({ behavior: "smooth", block: "start" });
+  } catch (error) {
+    $("location-note").textContent = error.message || "The microsite sketch could not be built.";
+  }
 }
 
 function renderProposal(proposal) {
