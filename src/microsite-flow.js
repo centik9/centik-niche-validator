@@ -1,4 +1,6 @@
+import { compareScoredRows, scoreExampleMarket } from "./composite-score.js";
 import { HttpError } from "./errors.js";
+import { priceCoverage, priceFor } from "./job-prices.js";
 import { screenCandidates } from "./screen.js";
 
 export const FLOW_MODEL_ID = "centik-microsite-flow-v1";
@@ -24,13 +26,12 @@ const PLUMBING_SUBNICHES = [
   ["water-softener", "Water softener service", 28, "Softener install and salt-system checks."],
   ["backflow", "Backflow testing", 22, "Annual backflow device tests."],
   ["tankless-water-heater", "Tankless water heater service", 16, "Tankless descaling and error codes."]
-].map(([id, label, example_strength, evidence], index) => ({
+].map(([id, label, example_strength, evidence]) => ({
   id,
   label,
-  example_rank: index + 1,
   example_strength,
-  evidence: `Illustrative example score ${example_strength}. ${evidence} Not a measured opportunity.`,
-  note: "Example score only. Not search volume, not Census data, and not a validated ranking."
+  evidence: `Example demand index ${example_strength}. ${evidence} Not a measured opportunity.`,
+  note: "Demand and competition are example fixtures. The job-price range, when present, is a national published figure."
 }));
 
 const LOCATIONS = [
@@ -60,14 +61,28 @@ function clampDemand(value) {
   return Math.max(8, Math.min(96, value));
 }
 
+function exampleMarketInputs(relativeDemand) {
+  const exampleRelativeDemand = clampDemand(relativeDemand);
+  return {
+    exampleRelativeDemand,
+    exampleMonthlySearches: exampleRelativeDemand * 12,
+    exampleCompetitorCount: Math.max(3, Math.round(28 - exampleRelativeDemand / 4)),
+    formula: "Example searches = example relative demand × 12. Example competitor count = max(3, round(28 − demand / 4)). Both are fixture formulas, not Google volume and not a Maps count."
+  };
+}
+
 function demandFor(location, subnicheId, rankingKind) {
   const shift = rankingKind === "example_suggestion" ? (SHIFTS[subnicheId] || {})[location.id] || 0 : 0;
-  const exampleRelativeDemand = clampDemand(location.base + shift);
+  return exampleMarketInputs(location.base + shift);
+}
+
+function scoredSubniche(subniche, relativeDemand) {
+  const inputs = exampleMarketInputs(relativeDemand);
+  const price = priceFor(subniche.id);
   return {
-    example_relative_demand: exampleRelativeDemand,
-    example_monthly_searches: exampleRelativeDemand * 12,
-    example_competitor_count: Math.max(3, Math.round(28 - exampleRelativeDemand / 4)),
-    formula: "Example searches = example relative demand × 12. Example competitor count = max(3, round(28 − demand / 4)). Both are fixture formulas, not Google volume and not a Maps count."
+    ...subniche,
+    price,
+    composite: scoreExampleMarket({ ...inputs, price })
   };
 }
 
@@ -83,8 +98,9 @@ export function suggestSubniches(keyword) {
       profile_id: "plumbing",
       ranking_kind: "example_suggestion",
       row_count: PLUMBING_SUBNICHES.length,
-      ranking_note: "Twenty plumbing rows in a fixed example order. Rank 1 has the longest illustrative bar. This is not researched demand and not a validated opportunity ranking. A longer list would use the same scrolling leaderboard.",
-      subniches: PLUMBING_SUBNICHES,
+      ranking_note: "Twenty plumbing rows sorted by composite band: green (60 or higher), then yellow, then red. Inside a band, the higher composite is first. Demand and competition are example fixtures. Job prices are national published ranges and are not adjusted for a city. A missing price withholds that row's composite.",
+      price_coverage: priceCoverage(PLUMBING_SUBNICHES.map((item) => item.id)),
+      subniches: PLUMBING_SUBNICHES.map((item) => scoredSubniche(item, item.example_strength)).sort(compareScoredRows).map((item, index) => ({ ...item, example_rank: index + 1 })),
       unranked_option: null
     };
   }
@@ -215,6 +231,11 @@ export async function buildShortlist(body) {
   });
   const cards = LOCATIONS.map((location) => {
     const demand = demandFor(location, subniche.id, suggestion.ranking_kind);
+    const inputs = {
+      exampleRelativeDemand: demand.exampleRelativeDemand,
+      exampleMonthlySearches: demand.exampleMonthlySearches,
+      exampleCompetitorCount: demand.exampleCompetitorCount
+    };
     const proxy = screen.candidates.find((candidate) => samePlace(candidate.input, location));
     const proxyKnown = proxy && proxy.geography.outcome === "matched";
     return {
@@ -224,11 +245,11 @@ export async function buildShortlist(body) {
       state: location.state,
       country: "United States",
       subniche_label: subniche.label,
-      example_relative_demand: demand.example_relative_demand,
+      example_relative_demand: inputs.exampleRelativeDemand,
       example_evidence: {
         label: "EXAMPLE",
-        monthly_searches: demand.example_monthly_searches,
-        competitor_count: demand.example_competitor_count,
+        monthly_searches: inputs.exampleMonthlySearches,
+        competitor_count: inputs.exampleCompetitorCount,
         formula: demand.formula,
         not_keyword_volume: true,
         not_census: true
@@ -280,9 +301,17 @@ export async function buildShortlist(body) {
 
 export function buildProposal(body) {
   const context = requireKeyword(body);
-  const { subniche } = selectedSubniche(context.keyword, body.subniche_id);
+  const { suggestion, subniche } = selectedSubniche(context.keyword, body.subniche_id);
   const location = LOCATIONS.find((item) => item.id === body.location_id);
   if (!location) throw new HttpError(400, "inconsistent_choice", "That location is not in the example shortlist.");
+  const demand = demandFor(location, subniche.id, suggestion.ranking_kind);
+  const price = priceFor(subniche.id);
+  const composite = scoreExampleMarket({
+    exampleRelativeDemand: demand.exampleRelativeDemand,
+    exampleMonthlySearches: demand.exampleMonthlySearches,
+    exampleCompetitorCount: demand.exampleCompetitorCount,
+    price
+  });
   const slug = `${location.name}-${subniche.label}`.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
   return {
     model_id: FLOW_MODEL_ID,
@@ -310,8 +339,12 @@ export function buildProposal(body) {
     location: { id: location.id, name: location.name, state: location.state, geography_type: location.geography_type },
     subniche: { id: subniche.id, label: subniche.label },
     keyword: context.keyword,
+    price,
+    composite,
     deep_check_gate: {
       paid_calls_allowed: false,
+      clears_green: composite.clears_green_label,
+      gate_line: `Clears green: ${composite.clears_green_label}. Yes does not authorize spending or publishing.`,
       example_check_available: location.example_deep_check && location.geography_type === "city",
       reason: location.geography_type === "city"
         ? (location.example_deep_check

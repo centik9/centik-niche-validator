@@ -74,11 +74,23 @@ function paintStepper() {
   });
 }
 
-function strengthBar(score) {
-  const bar = el("div", { class: "bar segments" });
-  const filled = Math.max(0, Math.min(20, Math.round(Number(score) / 5)));
+function strengthBar(score, band) {
+  const bar = el("div", { class: `bar segments band-${band || "missing"}` });
+  const filled = score === null || score === undefined ? 0 : Math.max(0, Math.min(20, Math.round(Number(score) / 5)));
   for (let mark = 0; mark < 20; mark += 1) bar.append(el("i", { class: mark < filled ? "on" : "" }));
   return bar;
+}
+
+function sourceLine(price) {
+  if (!price || price.status !== "published") {
+    return el("p", { class: "source-line" }, [price && price.source_line ? price.source_line : "Price range missing"]);
+  }
+  const line = el("p", { class: "source-line" }, [
+    `${price.source_name}. Accessed November 8, 2026. National range, not adjusted for a city. `
+  ]);
+  const link = el("a", { href: price.url, rel: "noopener noreferrer" }, [price.url]);
+  line.append(link);
+  return line;
 }
 
 function showSubniches(report, error) {
@@ -114,20 +126,26 @@ function showSubniches(report, error) {
     const row = el("button", {
       type: "button",
       class: "leader-row",
-      "aria-label": `Rank ${choice.example_rank}, ${choice.label}, illustrative example score ${choice.example_strength}`
+      "aria-label": choice.composite.status === "calculated"
+        ? `Rank ${choice.example_rank}, ${choice.label}, composite ${choice.composite.composite_display}, ${choice.composite.band} band`
+        : `Rank ${choice.example_rank}, ${choice.label}, price range missing`
     }, [
       el("span", { class: "rank" }, [String(choice.example_rank)]),
       el("span", { class: "leader-body" }, [
         el("span", { class: "leader-label" }, [
           el("strong", {}, [choice.label]),
-          el("span", { class: "leader-score" }, [`Example ${choice.example_strength}`])
+          el("span", { class: `leader-score band-${choice.composite.band}` }, [
+            choice.composite.status === "calculated" ? choice.composite.composite_display : "Price range missing"
+          ])
         ]),
-        strengthBar(choice.example_strength),
-        el("p", { class: "leader-evidence" }, [choice.evidence])
+        strengthBar(choice.composite.composite_display, choice.composite.band),
+        el("p", { class: "leader-evidence" }, [
+          choice.price.status === "published" ? `${choice.price.sentence} National range, not adjusted for a city.` : "Price range missing. Margin is missing, so this row is not scored."
+        ])
       ])
     ]);
     row.addEventListener("click", () => chooseSubniche(choice));
-    item.append(row);
+    item.append(row, sourceLine(choice.price));
     list.append(item);
   });
   slot.append(list);
@@ -260,9 +278,84 @@ async function chooseLocation(card) {
   }
 }
 
+function gaugePoint(score, radius) {
+  const angle = Math.PI * (1 - score / 100);
+  return [180 + radius * Math.cos(angle), 168 - radius * Math.sin(angle)];
+}
+
+function gaugeArc(start, end, color) {
+  const [x1, y1] = gaugePoint(start, 118);
+  const [x2, y2] = gaugePoint(end, 118);
+  return svgEl("path", {
+    d: `M ${x1} ${y1} A 118 118 0 0 0 ${x2} ${y2}`,
+    fill: "none",
+    stroke: color,
+    "stroke-width": "16",
+    "stroke-linecap": "butt"
+  });
+}
+
+function svgEl(tag, attrs, children) {
+  const node = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  Object.entries(attrs || {}).forEach(([key, value]) => node.setAttribute(key, String(value)));
+  (children || []).forEach((child) => node.append(child instanceof Node ? child : document.createTextNode(String(child))));
+  return node;
+}
+
+function renderGauge(composite) {
+  const calculated = composite.status === "calculated";
+  const label = calculated
+    ? `Composite ${composite.composite_display} out of 100. ${composite.band} band. Clears green: ${composite.clears_green_label}.`
+    : "Composite withheld. Price range missing. Clears green: not calculated.";
+  const svg = svgEl("svg", { viewBox: "0 0 360 200", role: "img", "aria-label": label });
+  svg.append(gaugeArc(0, 30, "#b42318"), gaugeArc(30, 60, "#c48a12"), gaugeArc(60, 100, "#1e7a46"));
+  for (let mark = 0; mark <= 100; mark += 10) {
+    const [x1, y1] = gaugePoint(mark, 100);
+    const [x2, y2] = gaugePoint(mark, 128);
+    const [tx, ty] = gaugePoint(mark, 142);
+    svg.append(svgEl("line", { x1, y1, x2, y2, stroke: "#1d1914", "stroke-width": "2" }));
+    svg.append(svgEl("text", { x: tx, y: ty, "text-anchor": "middle", "dominant-baseline": "middle", fill: "#1d1914", "font-size": "12" }, [String(mark)]));
+  }
+  if (calculated) {
+    const [nx, ny] = gaugePoint(Number(composite.composite_display), 92);
+    svg.append(svgEl("line", { x1: "180", y1: "168", x2: nx, y2: ny, stroke: "#1d1914", "stroke-width": "4", "stroke-linecap": "round" }));
+  }
+  svg.append(svgEl("circle", { cx: "180", cy: "168", r: "6", fill: "#1d1914" }));
+  const figure = el("figure", { class: "gauge" });
+  figure.append(svg);
+  figure.append(el("p", { class: "score-number" }, [calculated ? composite.composite_display : "Price range missing"]));
+  figure.append(el("p", { class: "gauge-text" }, [label]));
+  return figure;
+}
+
+function renderBreakdown(composite) {
+  const block = el("div", { class: "breakdown" });
+  block.append(el("h3", {}, ["Composite breakdown"]));
+  block.append(el("p", { class: "help" }, [composite.normalization.composite]));
+  const demand = composite.demand;
+  block.append(el("p", {}, [
+    `Demand contribution ${demand.contribution_display === null ? "missing" : demand.contribution_display}. EXAMPLE demand index ${demand.index}. EXAMPLE search volume ${demand.monthly_searches} monthly searches.`
+  ]));
+  const competition = composite.competition;
+  block.append(el("p", {}, [
+    `Competition contribution ${competition.contribution_display === null ? "missing" : competition.contribution_display}. EXAMPLE competitor count ${competition.competitor_count}. EXAMPLE competition index ${competition.index}. Less competition scores higher.`
+  ]));
+  const margin = composite.margin;
+  block.append(el("p", {}, [
+    margin.status === "published"
+      ? `Margin contribution ${margin.contribution_display}. ${margin.sentence} National range, not adjusted for a city.`
+      : "Margin contribution missing. Price range missing. Missing is not scored as zero."
+  ]));
+  if (margin.status === "published") block.append(sourceLine(margin));
+  block.append(el("p", { class: "help" }, [composite.normalization.margin]));
+  return block;
+}
+
 function renderProposal(proposal) {
   const slot = $("proposal-slot");
   slot.replaceChildren();
+  slot.append(renderGauge(proposal.composite));
+  slot.append(renderBreakdown(proposal.composite));
   const card = el("article", { class: "proposal-card" });
   card.append(el("p", { class: "tag tag-example" }, ["Suggestion only"]));
   card.append(el("h3", {}, [proposal.microsite_name]));
@@ -273,6 +366,7 @@ function renderProposal(proposal) {
   card.append(list);
   proposal.claims_not_made.forEach((line) => card.append(el("p", {}, [line])));
   card.append(el("p", {}, [proposal.yes_means]));
+  card.append(el("p", { class: "notice" }, [proposal.deep_check_gate.gate_line]));
   const actions = el("div", { class: "choice-actions actions" });
   const yes = el("button", { type: "button" }, ["Yes, keep this sketch"]);
   const no = el("button", { type: "button", class: "no" }, ["No, try another location"]);

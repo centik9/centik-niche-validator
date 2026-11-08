@@ -12,19 +12,34 @@ import { postJson, withServer } from "./helpers.js";
 
 const context = { keyword: "plumbing" };
 
-test("plumbing sub-niches are a 20-row example leaderboard", () => {
+test("plumbing sub-niches are a 20-row composite leaderboard", () => {
   const result = suggestSubniches("Emergency plumber");
   assert.equal(result.known_profile, true);
   assert.equal(result.subniches.length, 20);
-  assert.equal(result.subniches[0].label, "Emergency plumbing");
-  assert.equal(result.subniches[0].example_rank, 1);
-  assert.equal(result.subniches[0].example_strength, 96);
-  assert.equal(result.subniches[19].label, "Tankless water heater service");
-  assert.equal(result.subniches[19].example_strength, 16);
-  const strengths = result.subniches.map((item) => item.example_strength);
-  assert.deepEqual(strengths, [...strengths].sort((a, b) => b - a));
   assert.equal(new Set(result.subniches.map((item) => item.id)).size, 20);
-  assert.match(result.ranking_note, /not researched demand/);
+  const order = { green: 0, yellow: 1, red: 2, missing: 3 };
+  result.subniches.forEach((item, index) => {
+    assert.equal(item.example_rank, index + 1);
+    if (index === 0) return;
+    const previous = result.subniches[index - 1];
+    assert.ok(order[item.composite.band] >= order[previous.composite.band]);
+    if (item.composite.band === previous.composite.band && item.composite.composite_tenths !== null) {
+      assert.ok(previous.composite.composite_tenths >= item.composite.composite_tenths);
+    }
+  });
+  const drain = result.subniches.find((item) => item.id === "drain-cleaning");
+  assert.equal(drain.price.low_dollars, 147);
+  assert.equal(drain.price.high_dollars, 352);
+  assert.equal(drain.price.city_adjusted, false);
+  assert.equal(drain.price.source_name, "Angi");
+  assert.equal(result.price_coverage.missing_ids.includes("emergency-plumbing"), true);
+  assert.equal(result.price_coverage.missing_ids.includes("bath-remodel-plumbing"), true);
+  assert.equal(result.price_coverage.missing_ids.includes("repipe"), true);
+  const emergency = result.subniches.find((item) => item.id === "emergency-plumbing");
+  assert.equal(emergency.composite.status, "withheld");
+  assert.equal(emergency.composite.band, "missing");
+  assert.equal(emergency.price.sentence, "Price range missing");
+  assert.match(result.ranking_note, /not adjusted for a city/);
 });
 
 test("an unknown keyword is not given a fake specialty ranking", () => {
@@ -93,6 +108,24 @@ test("a proposal must match the keyword and does not authorize spending", () => 
   assert.equal(proposal.domain_availability, "not_checked");
   assert.equal(proposal.deep_check_gate.paid_calls_allowed, false);
   assert.equal(proposal.deep_check_gate.example_check_available, true);
+  assert.equal(proposal.composite.status, "withheld");
+  assert.equal(proposal.deep_check_gate.clears_green, "not calculated");
+  const nyc = buildProposal({ keyword: "plumbing", subniche_id: "drain-cleaning", location_id: "new-york-ny" });
+  assert.equal(nyc.composite.demand.index, 90);
+  assert.equal(nyc.composite.demand.monthly_searches, 1080);
+  assert.equal(nyc.composite.demand.contribution_display, "36.0");
+  assert.equal(nyc.composite.competition.competitor_count, 6);
+  assert.equal(nyc.composite.competition.index, 80);
+  assert.equal(nyc.composite.competition.contribution_display, "24.0");
+  assert.equal(nyc.composite.margin.low_dollars, 147);
+  assert.equal(nyc.composite.margin.high_dollars, 352);
+  assert.equal(nyc.composite.margin.index, 23);
+  assert.equal(nyc.composite.margin.contribution_display, "6.9");
+  assert.equal(nyc.composite.margin.city_adjusted, false);
+  assert.equal(nyc.composite.composite_display, "66.9");
+  assert.equal(nyc.composite.band, "green");
+  assert.equal(nyc.deep_check_gate.gate_line, "Clears green: yes. Yes does not authorize spending or publishing.");
+  assert.equal(nyc.deep_check_gate.paid_calls_allowed, false);
   assert.equal(proposal.claims_not_made.some((line) => /licensed/i.test(line)), true);
   assert.throws(() => buildProposal({
     keyword: "bakery delivery",
