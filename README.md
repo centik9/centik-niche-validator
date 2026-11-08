@@ -1,1 +1,225 @@
-# centik-niche-validator
+# Centik Niche Validator
+
+In-house local niche check for one keyword in one explicitly named city. It reads Google Ads search demand and a capped Google Maps sample through DataForSEO, then applies a published heuristic. The index is not a grade, not a recommendation, and not an economic valuation.
+
+Version 0.1.0 is safe to run with no credentials. Live DataForSEO calls are off unless the server process is started with `DATAFORSEO_LIVE=true`.
+
+## What a result is
+
+A validation report has three separate pieces:
+
+- **Demand.** Approximate average monthly Google searches for one keyword, from Google Ads via DataForSEO `POST /v3/keywords_data/google_ads/search_volume/live`. CPC, top-of-page bids, and paid-search competition are shown beside it and are not part of the index.
+- **Maps sample.** Deduplicated organic listings from `POST /v3/serp/google/maps/live/advanced` with `depth` fixed at 20. Paid items and directory items are counted separately and excluded from the organic sample.
+- **Heuristic index.** A weighted combination of a demand band and how full that 20-listing sample was. The formula, weights, inputs, completeness, and confidence adjustments are in every response. The combined index is withheld when it would have to be invented.
+
+`market_measurement.exhaustive_market`, `buyers_verified`, and `economic_value_estimated` are always `false`.
+
+## What this version does not do
+
+- It does not estimate revenue, customer counts, close rates, advertiser spend, or market size in dollars. CPC is not multiplied by search volume.
+- It does not treat a null from Google Ads as zero. Null, unsupported, and failed demand produce no combined index.
+- It does not treat an empty Maps sample as an open market. A measured zero listing count withholds the combined index. The demand index is still reported.
+- It does not claim the Maps sample is exhaustive. DataForSEO's endpoint defaults to 100 results and allows 700, billed per SERP of up to 100 results, with possible extra charges above 100. This app requests 20 and does not paginate.
+- It does not treat `se_results_count` as a census. DataForSEO documents it as the SERP total, and published examples can show `0` while items are present. It is never used in the score.
+- It does not treat `is_claimed` as a verified buyer. It means the Google listing has a claimed owner.
+- It does not pick a city by a partial or wrong-state name. `Springfield` in Illinois is not Springfield in Missouri. `Portland` in Maine is not Portland in Oregon, and it is not South Portland.
+- It does not send a Google Ads location code to the Maps endpoint, or the reverse. The two products have separate location lists.
+- Example mode does not measure the city you typed. The banner says so. Fixture niches such as `missing volume` are exact phrases for the built-in fixture only. Live mode sends the keyword as typed.
+
+## Run locally
+
+Node.js 18 or newer. There are no npm dependencies.
+
+```bash
+npm test
+npm start
+```
+
+The process binds `0.0.0.0` and listens on `PORT`, or 3000 if `PORT` is unset. Open `http://127.0.0.1:3000`.
+
+`GET /health` returns the service name, version, whether live mode is exactly enabled, and whether both credential variables are non-empty. It does not return credential values.
+
+## Web UI
+
+The form asks for a niche keyword plus city, state, and country as separate fields. Resolve a location, confirm that the returned city is the one you meant, then run a validation.
+
+The primary actions use example mode. Live buttons stay disabled unless `/health` reports `live_mode: true`, and the server still rejects a live request unless it was started with the opt-in below. A withheld index is labeled **Withheld**. It is not displayed as 0. A calculated `0.0` is a real result of the formula (measured zero demand and a full 20-listing sample).
+
+## HTTP API
+
+`POST /api/resolve` and `POST /api/validate` accept `application/json`.
+
+Resolve:
+
+```json
+{
+  "mode": "example",
+  "city": "Austin",
+  "state": "Texas",
+  "country": "United States"
+}
+```
+
+`mode` may be omitted and then defaults to `example`. `TX` is accepted for a US state. `CA` in the country field means Canada, not California. `England` is rejected as a country; put it in the state field and use United Kingdom or `gb` as the country. Two-letter codes that are US state abbreviations are not accepted as country codes, except the explicit country aliases (`US`, `CA`). Other ISO codes such as `fr` are accepted. Named countries include United States, Canada, United Kingdom, Australia, Germany, France, and the list in `src/countries.js`.
+
+A usable resolve outcome is `matched`, `partial_match`, or `partial_failure`. `ambiguous`, `unconfirmed`, and `unsupported` cannot be validated. Same-city rows in another state are returned in `same_city_other_regions` and are not selected. A City or Municipality row is used only when its name segments match and a parent admin region (state, province, territory, and the other types listed in `src/locations.js`) confirms that state. Counties are not treated as the city. If the parent chain does not confirm the state, the outcome is `unconfirmed` and no billable request is sent.
+
+Validate echoes the resolved identity. Client-supplied `location_code` fields outside that confirmed identity are ignored. A stale code returns 409 and does not call search volume or Maps.
+
+```json
+{
+  "mode": "example",
+  "niche": "emergency plumber",
+  "city": "Austin",
+  "state": "TX",
+  "country": "United States",
+  "confirmed": {
+    "google_ads": {
+      "location_code": 9001007,
+      "location_name": "Austin,Texas,United States",
+      "location_type": "City"
+    },
+    "google_maps": {
+      "location_code": 9101007,
+      "location_name": "Austin,Texas,United States",
+      "location_type": "City"
+    }
+  }
+}
+```
+
+The numeric codes above are example-gazetteer codes, not DataForSEO codes. Live mode replaces them with codes from the provider's location lists.
+
+Field statuses are `measured`, `measured_zero`, `missing`, `unsupported`, `failed`, `unusable`, `inconsistent`, or `not_requested`. `measured_zero` means the provider returned a numeric zero. `missing` means the field was null or absent after a successful call. Those are not interchangeable.
+
+## Environment
+
+Copy the names from `.env.example`. Put real values in the host environment, not in git.
+
+| Variable | Role |
+| --- | --- |
+| `DATAFORSEO_LOGIN` | DataForSEO API login. Placeholder in `.env.example` only. |
+| `DATAFORSEO_PASSWORD` | DataForSEO API password. Placeholder in `.env.example` only. |
+| `DATAFORSEO_LIVE` | Must be the exact string `true` to allow live calls. `TRUE`, `1`, and `yes` leave live mode off. |
+| `PORT` | Optional listen port. Defaults to 3000. |
+
+There is no `.env` loader. A file named `.env` is gitignored so it is not committed; this process does not read it. Inject the variables in the shell or the host.
+
+Live calls use HTTP Basic auth and are not retried. The transport refuses any endpoint other than the two uncharged location lists, the search-volume live call, and the Maps live call. It refuses `location_name`, `location_coordinate`, custom date ranges, more than one keyword, `search_partners: true`, and any Maps depth other than 20. Request bodies that contain the login or password are refused before send. Logs and error responses pass through a redactor for those values and for `Authorization: Basic` tokens.
+
+Location lists are cached in process memory for six hours. The cache is lost on restart. Nothing is written to disk.
+
+## How demand and Maps are read
+
+Search volume requests send one keyword, `language_code` `en`, `search_partners` `false`, and the confirmed Google Ads city `location_code`. No date range is sent. DataForSEO's default is the past 12 months, and Google Ads does not return the current month. The report shows that request policy and the months actually present. The demand index uses the `search_volume` field, which DataForSEO describes as the approximate monthly average. A separate arithmetic mean of the monthly rows is only a cross-check.
+
+`competition` values `LOW`, `MEDIUM`, and `HIGH`, and `competition_index` 0–100, are Google Ads paid-SERP advertiser competition. They are not local business counts.
+
+CPC and the low/high top-of-page bids are Google Ads USD statistics. They are excluded from the index.
+
+Maps requests send the same keyword, `language_code` `en`, the confirmed Maps `location_code`, `depth` 20, `device` `desktop`, `os` `windows`, and `search_this_area` `true`. `search_this_area: false` can pull listings from outside the displayed area, so it is not used.
+
+Organic `maps_search` rows are deduplicated by `place_id`, then `cid`, then normalized title plus address. `maps_paid_item` rows and `is_directory_item: true` rows are excluded from the organic count. Listings whose `address_info.city` differs from the query city stay in the sample and are counted; they are not silently dropped. DataForSEO documents `address_info.region` as a DMA region, so it is not used as a state filter.
+
+Requests use English. Searches in other languages are not measured. Google Ads may return no data for some keywords, may combine similar keywords, and may spell-correct. A differing `spell` value is reported, lowers confidence by 0.05, and means the volume describes the corrected keyword.
+
+## Scoring model `centik-heuristic-v1`
+
+Weights: demand index `0.65`, sample openness `0.35`. The implementation uses integer percents `65` and `35`.
+
+Demand index, from approximate average monthly searches:
+
+| Searches | Index | Label |
+| --- | ---: | --- |
+| 0 | 0 | Measured zero |
+| 1–9 | 15 | Very low monthly average |
+| 10–49 | 35 | Low monthly average |
+| 50–199 | 55 | Moderate monthly average |
+| 200–999 | 75 | High monthly average |
+| 1000 and above | 90 | Very high monthly average |
+
+The top band is 90 so a large volume is not shown as 100. Non-integers are `unusable` and are not placed in a band.
+
+Sample openness:
+
+```text
+100 - (100 * min(unique_organic_listings, 20) / 20)
+```
+
+Combined index, only when both inputs are measured numbers and the unique organic count is greater than zero:
+
+```text
+round_half_up((65 * demand_index + 35 * sample_openness) / 10) / 10
+```
+
+Rounding uses that integer expression so binary floating point does not choose the tenth. The default example fixture (320 searches, 12 unique listings, openness 40) is `62.8`.
+
+The combined index is withheld when:
+
+- demand is missing, unsupported, failed, or unusable
+- the Maps organic sample is missing, unsupported, or failed
+- the Maps sample is a measured zero (openness would otherwise be 100)
+
+Measured zero demand is still a measurement. It can enter the index when the Maps sample is a non-zero measured count.
+
+Measured zero demand with a non-empty measured sample still produces an index. The demand index is 0, so the result only reflects unfilled slots in a 20-listing sample. The default example niche `zero volume` is `14.0`. The niche `zero volume saturated` is a calculated `0.0`, which is different from a withheld index.
+
+Completeness is how many of the two required inputs were measured. CPC is not required.
+
+Confidence is reported in hundredths only when the combined index is calculated. It starts at 35. It adds 15 when at least six monthly values are numeric, plus 5 more when at least twelve are numeric, plus 10 when both locations are City or Municipality. It subtracts 10 when the organic sample fills the depth cap, and 5 when the keyword was spell-corrected. The result is clamped between 20 and 75 hundredths. The cap is 0.75 because this is one English keyword and a 20-row Maps sample. It is not a probability that a niche will succeed. Confidence is withheld together with the index so missing demand cannot look confident.
+
+The worked example for a normal keyword in example mode uses confidence `0.65`.
+
+## Example fixtures
+
+These niches are exact, case-insensitive matches in example mode only:
+
+| Niche | What the fixture demonstrates |
+| --- | --- |
+| any other phrase | 320 average monthly searches, CPC 8.5 USD, 12 listings, one address city outside the query, `se_results_count` 0 alongside items, index 62.8 |
+| `missing volume` | null volume and CPC; combined index withheld |
+| `zero volume` | measured zero volume and CPC; index 14.0 |
+| `zero volume saturated` | measured zero volume and 20 listings; calculated 0.0 |
+| `missing cpc` | volume present, CPC null; index still 62.8 |
+| `maps empty` | measured zero listings; index withheld |
+| `maps duplicates` | duplicate `place_id` and title/address, plus paid and directory rows |
+| `maps failed` / `maps timeout` / `demand failed` | component failure, not a zero |
+| `spellcheck test` | spell value `emergency plumber`; confidence 0.60 |
+| `uneven months` | monthly mean differs from `search_volume`; the index still uses `search_volume` |
+
+Example location coverage is a small gazetteer: several Springfields, both Portlands, South Portland, Austin, New York City versus New York State, both Kansas Cities, Vancouver in Washington and in British Columbia, Washington DC versus Washington State, and Saint Louis. It is not the DataForSEO directory.
+
+## Safety limits
+
+- API body cap 8 KB, with a 10 second body timeout.
+- Per-IP cap of 30 API requests per minute.
+- When live mode is on, 4 live requests per 10 minutes per IP and 6 live requests per minute for the whole process. The Google Ads live endpoint's documented account limit is 12 requests per minute; the process cap stays under that.
+- Upstream timeout 15 seconds. Responses over 25 MB are aborted.
+- The HTTP server request timeout is 60 seconds.
+- Rate-limit responses are 429 and do not send another provider request.
+- `POST` with `mode: "live"` while the server flag is off returns 403. Example data is not substituted for that request.
+- Live mode with the flag on but without both credentials returns 503 and does not call the network.
+
+## Tests
+
+`npm test` runs `node --test`. The suite uses an injected transport. It does not call DataForSEO.
+
+## Later Render deployment
+
+Not deployed from this version. When it is deployed as a web service:
+
+- Bind is already `0.0.0.0:$PORT`.
+- Use `GET /health` as the health check.
+- Set `DATAFORSEO_LOGIN`, `DATAFORSEO_PASSWORD`, and, only when a live check is intended, `DATAFORSEO_LIVE=true` in the Render environment. Do not commit them.
+- The filesystem is ephemeral. This app does not store reports on disk.
+- Run one web service for this app. Free web services spin down after inactivity.
+
+## Pending
+
+These are not done in this version:
+
+- Runtime secret configuration. Credentials stay on the operator's machine and are not in this repository.
+- A live integration check against DataForSEO. No paid or uncharged provider call was made while building this version.
+- Deployment, including Render.
+
+No license is included.

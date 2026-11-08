@@ -1,0 +1,18 @@
+{
+  "name": "centik-niche-validator",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local niche validator using DataForSEO search demand and Google Maps competition, with an explicit heuristic score.",
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/centik9/centik-niche-validator.git"
+  }
+}

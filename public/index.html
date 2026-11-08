@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Centik Niche Validator</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="mast">
+    <p class="mark">Centik</p>
+    <h1>Niche Validator</h1>
+    <p class="lede">Local search demand and Google Maps competition, scored with a published heuristic. This is not a valuation and not a recommendation.</p>
+    <p class="notice" id="mode-notice">Example mode is the default. Fixture results are not real market measurements. Live DataForSEO calls stay off unless the server environment sets DATAFORSEO_LIVE=true.</p>
+    <p class="server-status" id="server-status">Checking server…</p>
+  </header>
+  <main>
+    <section class="panel" aria-labelledby="query-heading">
+      <h2 id="query-heading">Market query</h2>
+      <p class="help">City, state, and country are separate on purpose. Abbreviations such as TX are expanded only for US states. CA in the country field means Canada.</p>
+      <form id="query-form">
+        <label class="field wide">
+          <span>Niche keyword</span>
+          <input id="niche" name="niche" autocomplete="off" maxlength="80" required placeholder="emergency plumber">
+        </label>
+        <div class="place-grid">
+          <label class="field">
+            <span>City</span>
+            <input id="city" name="city" autocomplete="address-level2" maxlength="80" required placeholder="Austin">
+          </label>
+          <label class="field">
+            <span>State or region</span>
+            <input id="state" name="state" autocomplete="address-level1" maxlength="80" required placeholder="Texas">
+          </label>
+          <label class="field">
+            <span>Country</span>
+            <input id="country" name="country" autocomplete="country-name" maxlength="80" required placeholder="United States">
+          </label>
+        </div>
+        <div class="fixtures" aria-label="Example fixture niches">
+          <p>Example-only fixtures. These phrases do nothing special in live mode.</p>
+          <div id="fixture-buttons"></div>
+        </div>
+        <div class="actions">
+          <button type="button" id="resolve-example">Resolve example location</button>
+          <button type="button" id="resolve-live">Resolve live location lists</button>
+        </div>
+      </form>
+    </section>
+    <section class="panel" id="resolution" aria-live="polite" aria-labelledby="resolution-heading"></section>
+    <section class="panel" id="report" aria-live="polite" aria-labelledby="report-heading"></section>
+  </main>
+  <noscript><p class="notice">This page needs JavaScript to resolve a location and run a validation.</p></noscript>
+  <script src="/app.js"></script>
+</body>
+</html>
