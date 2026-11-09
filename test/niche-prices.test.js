@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { zoneFor } from "../src/gauge-zone.js";
+import { priceFor } from "../src/job-prices.js";
 import { priceForServiceNiche, priceFromBrokenSource } from "../src/niche-prices.js";
+import { pendingFindings } from "../src/pending-prices.js";
+import { scoreExampleMarket } from "../src/composite-score.js";
 import { buildProposal, suggestSubniches } from "../src/microsite-flow.js";
 
 test("zone words keep the 15, 30, 60, and 80 cuts", () => {
@@ -51,4 +54,17 @@ test("direct prices stay sourced and estimates cannot rank as green", () => {
   assert.equal(proposal.deep_check_gate.gate_line.startsWith("Clears green on an estimated price."), true);
   assert.match(proposal.deep_check_gate.demand_basis_note, /national example demand/);
   assert.equal(proposal.deep_check_gate.paid_calls_allowed, false);
+  const pending = priceFor("bath-remodel-plumbing");
+  assert.equal(pending.pending_review, true);
+  assert.equal(pending.reviewed, false);
+  const scored = scoreExampleMarket({
+    exampleRelativeDemand: 96,
+    exampleMonthlySearches: 1152,
+    exampleCompetitorCount: 4,
+    price: pending
+  });
+  assert.equal(scored.band === "green", false);
+  assert.equal(scored.clears_green_label, "pending review");
+  assert.equal(pendingFindings().some((row) => row.source_url.includes("garage-door-cable-repair-cost")), true);
+  assert.equal(pendingFindings().some((row) => row.source_url.includes("ac-repair-cost")), true);
 });

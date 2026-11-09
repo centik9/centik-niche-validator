@@ -33,8 +33,10 @@ test("plumbing sub-niches are a 20-row composite leaderboard", () => {
   assert.equal(drain.price.city_adjusted, false);
   assert.equal(drain.price.source_name, "Angi");
   assert.equal(result.price_coverage.missing_ids.includes("emergency-plumbing"), false);
-  assert.equal(result.price_coverage.missing_ids.includes("bath-remodel-plumbing"), true);
-  assert.equal(result.price_coverage.missing_ids.includes("repipe"), true);
+  assert.equal(result.price_coverage.missing_ids.includes("bath-remodel-plumbing"), false);
+  assert.equal(result.price_coverage.missing_ids.includes("repipe"), false);
+  assert.equal(result.subniches.find((row) => row.id === "repipe").composite.band === "green", false);
+  assert.equal(result.subniches.find((row) => row.id === "bath-remodel-plumbing").price.pending_review, true);
   const emergency = result.subniches.find((item) => item.id === "emergency-plumbing");
   assert.equal(emergency.price.low_dollars, 210);
   assert.equal(emergency.price.high_dollars, 620);

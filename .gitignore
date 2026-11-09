@@ -13,5 +13,6 @@ npm-debug.log*
 dist/
 coverage/
 tmp/
+data/spend-ledger.json
 *.pem
 *.key

@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { isStale } from "./price-model.js";
+import { pendingPriceFor } from "./pending-prices.js";
 
 const raw = JSON.parse(readFileSync(new URL("../data/job-prices.json", import.meta.url), "utf8"));
 
@@ -37,6 +38,8 @@ export function formatDollars(amount) {
 export function priceFor(subnicheId) {
   const row = raw.ranges[subnicheId];
   if (!row) {
+    const pending = pendingPriceFor(subnicheId);
+    if (pending) return pending;
     return {
       status: "missing",
       low_dollars: null,

@@ -107,7 +107,8 @@ export function scoreExampleMarket({ exampleRelativeDemand, exampleMonthlySearch
   const value = tenths / 10;
   const scoreBand = bandForComposite(value);
   const estimated = price.estimated === true || price.kind === "derived" || price.kind === "borrowed";
-  const band = estimated && scoreBand === "green" ? "yellow" : scoreBand;
+  const pendingReview = price.pending_review === true;
+  const band = (estimated || pendingReview) && scoreBand === "green" ? "yellow" : scoreBand;
   const clears = value >= GREEN_MIN;
   return {
     ...base,
@@ -118,9 +119,10 @@ export function scoreExampleMarket({ exampleRelativeDemand, exampleMonthlySearch
     score_band: scoreBand,
     band,
     estimated,
+    pending_review: pendingReview,
     estimate_capped: estimated && scoreBand === "green",
     clears_green: clears,
-    clears_green_label: estimated && clears ? "on an estimated price" : (clears ? "yes" : "no")
+    clears_green_label: pendingReview ? "pending review" : (estimated && clears ? "on an estimated price" : (clears ? "yes" : "no"))
   };
 }
 

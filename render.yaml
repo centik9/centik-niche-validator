@@ -3,30 +3,23 @@ services:
     name: centik-niche-validator
     runtime: node
     plan: free
-    buildCommand: npm install
-    startCommand: npm start
+    buildCommand: npm ci
+    startCommand: node src/server.js
     healthCheckPath: /health
     envVars:
       - key: DATAFORSEO_LIVE
         sync: false
-        value: "false"
       - key: DATAFORSEO_LOGIN
         sync: false
       - key: DATAFORSEO_PASSWORD
         sync: false
-      - key: BUDGET_USD_TOTAL
+      - key: SPEND_CAP_USD
         sync: false
-        value: "10"
-      - key: BUDGET_USD_DAILY
-        sync: false
-        value: "5"
-      - key: DATA_DIR
-        sync: false
-        value: /tmp/centik-data
-      - key: ALLOWED_EMAILS
-        sync: false
-        value: team@centik.ai
-      - key: TEAM_ACCESS_CODE
+      - key: SPEND_TOKEN_SECRET
         sync: false
       - key: SESSION_SECRET
+        sync: false
+      - key: TEAM_ACCESS_CODE_HASH
+        sync: false
+      - key: ALLOWED_EMAILS
         sync: false

@@ -1,5 +1,8 @@
+import { hashAccessCode } from "../src/auth.js";
 import { createExampleTransport } from "../src/example-transport.js";
 import { createLocationDirectory } from "../src/locations.js";
+
+export const TEST_CODE = "test-code-not-a-secret";
 
 export function exampleDeps(transport = createExampleTransport()) {
   return {
@@ -36,8 +39,10 @@ export async function withServer(app, fn) {
 
 export const TEST_AUTH = {
   ALLOWED_EMAILS: "team@centik.ai",
-  TEAM_ACCESS_CODE: "test-code-not-a-secret",
-  SESSION_SECRET: "test-session-secret-32chars-minimum"
+  TEAM_ACCESS_CODE_HASH: hashAccessCode(TEST_CODE),
+  SESSION_SECRET: "test-session-secret-32chars-minimum",
+  SPEND_TOKEN_SECRET: "test-spend-token-secret-32chars-min",
+  SPEND_CAP_USD: "10"
 };
 
 const sessionJar = new Map();
@@ -47,7 +52,7 @@ export async function sessionCookie(port) {
   const response = await fetch(`http://127.0.0.1:${port}/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email: "team@centik.ai", access_code: TEST_AUTH.TEAM_ACCESS_CODE })
+    body: JSON.stringify({ email: "team@centik.ai", access_code: TEST_CODE })
   });
   const raw = response.headers.get("set-cookie") || "";
   const cookie = raw.split(";")[0];

@@ -10,10 +10,10 @@ import {
   SERVICE_NAME,
   VERSION
 } from "./config.js";
-import { accessGranted, readSession, sessionCookie, sessionTokenFromRequest, signSession } from "./auth.js";
+import { accessGranted, clearSessionCookie, readSession, sessionCookie, sessionTokenFromRequest, signSession } from "./auth.js";
 import { createLiveTransport } from "./dataforseo.js";
 import { HttpError } from "./errors.js";
-import { createSpendGuard, guardTransport } from "./spend.js";
+import { createSpendGate } from "./spend.js";
 import { createExampleTransport } from "./example-transport.js";
 import { parseResolveInput, parseValidateInput } from "./input.js";
 import { createLocationDirectory } from "./locations.js";
@@ -31,6 +31,15 @@ const PUBLIC_FILES = new Map([
   ["/flow.js", { file: "flow.js", type: "text/javascript; charset=utf-8" }],
   ["/styles.css", { file: "styles.css", type: "text/css; charset=utf-8" }]
 ]);
+
+function spendRefusal(reason) {
+  if (reason === "expired") return "That spend confirmation expired. No DataForSEO request was sent.";
+  if (reason === "reused") return "That spend confirmation was already used. No DataForSEO request was sent.";
+  if (reason === "mismatched") return "That spend confirmation does not match this niche and market. No DataForSEO request was sent.";
+  if (reason === "bad_signature") return "That spend confirmation is not valid. No DataForSEO request was sent.";
+  if (reason === "spend_cap_exceeded") return "This check would pass the spend cap. No DataForSEO request was sent.";
+  return "A paid check needs a fresh confirmation. No DataForSEO request was sent.";
+}
 
 function numberEnv(value, fallback) {
   const parsed = Number(value);
@@ -104,10 +113,10 @@ export function createApp(options = {}) {
   const apiLimiter = createRateLimiter({ ...limits.api, clock: now });
   const liveLimiter = createRateLimiter({ ...limits.live, clock: now });
   const globalLiveLimiter = createRateLimiter({ ...limits.globalLive, clock: now });
-  const spend = createSpendGuard({
-    dataDir: options.dataDir || env.DATA_DIR || "",
-    totalUsd: numberEnv(env.BUDGET_USD_TOTAL, 10),
-    dailyUsd: numberEnv(env.BUDGET_USD_DAILY, 5),
+  const spend = createSpendGate({
+    capUsd: numberEnv(env.SPEND_CAP_USD, 10),
+    ledgerPath: options.ledgerPath || env.SPEND_LEDGER_PATH || path.join(process.cwd(), "data", "spend-ledger.json"),
+    tokenSecret: env.SPEND_TOKEN_SECRET || "",
     now
   });
   const loginLimiter = createRateLimiter({ windowMs: 15 * 60_000, max: 8, clock: now });
@@ -117,14 +126,13 @@ export function createApp(options = {}) {
 
   function liveBundle() {
     if (liveCache) return liveCache;
-    const rawTransport = options.liveTransport || createLiveTransport({
+    const transport = options.liveTransport || createLiveTransport({
       login: env.DATAFORSEO_LOGIN,
       password: env.DATAFORSEO_PASSWORD,
       fetchImpl: options.fetchImpl,
       timeoutMs: options.upstreamTimeoutMs,
       redact
     });
-    const transport = options.liveTransport ? rawTransport : guardTransport(rawTransport, spend);
     liveCache = {
       transport,
       directory: options.liveDirectory || createLocationDirectory(transport, { clock: now })
@@ -199,8 +207,8 @@ export function createApp(options = {}) {
         rejectRate(res, decision);
         return;
       }
-      if (!env.TEAM_ACCESS_CODE || !env.SESSION_SECRET) {
-        send(res, 503, { error: "auth_not_configured", message: "TEAM_ACCESS_CODE and SESSION_SECRET must be set before anyone can sign in." });
+      if (!env.TEAM_ACCESS_CODE_HASH || !env.SESSION_SECRET) {
+        send(res, 503, { error: "auth_not_configured", message: "TEAM_ACCESS_CODE_HASH and SESSION_SECRET must be set before anyone can sign in." });
         return;
       }
       const text = await readBody(req, options.maxBodyBytes || MAX_BODY_BYTES, options.bodyTimeoutMs || BODY_TIMEOUT_MS);
@@ -218,7 +226,16 @@ export function createApp(options = {}) {
       send(res, 200, { ok: true }, { "Set-Cookie": sessionCookie(token) });
       return;
     }
-    if (req.method === "GET" && (pathname === "/login.js" || pathname === "/styles.css")) {
+    if ((req.method === "POST" || req.method === "GET") && pathname === "/logout") {
+      if (req.method === "GET") {
+        res.writeHead(302, { Location: "/login", "Set-Cookie": clearSessionCookie(), "Cache-Control": "no-store" });
+        res.end();
+        return;
+      }
+      send(res, 200, { ok: true }, { "Set-Cookie": clearSessionCookie() });
+      return;
+    }
+    if (req.method === "GET" && (pathname === "/login.js" || pathname === "/styles.css" || pathname === "/dashboard.js")) {
       const name = pathname.slice(1);
       const data = await fs.readFile(path.join(PUBLIC_DIR, name));
       res.writeHead(200, {
@@ -282,6 +299,31 @@ export function createApp(options = {}) {
       send(res, 200, spend.totals());
       return;
     }
+    if (req.method === "POST" && pathname === "/api/quote") {
+      const contentType = String(req.headers["content-type"] || "");
+      if (!contentType.toLowerCase().startsWith("application/json")) {
+        throw new HttpError(415, "unsupported_media", "Content-Type must be application/json.");
+      }
+      const text = await readBody(req, options.maxBodyBytes || MAX_BODY_BYTES, options.bodyTimeoutMs || BODY_TIMEOUT_MS);
+      let json;
+      try {
+        json = text ? JSON.parse(text) : null;
+      } catch {
+        throw new HttpError(400, "invalid_json", "Request body must be JSON.");
+      }
+      const prepared = parseValidateInput(json);
+      try {
+        const quoted = await spend.quote(session.email, prepared);
+        send(res, 200, { ...quoted, live_mode: liveEnabled(env), credentials_configured: credentialsReady(env) });
+      } catch (error) {
+        if (error && error.status) {
+          send(res, error.status, { error: error.code, message: error.message });
+          return;
+        }
+        throw error;
+      }
+      return;
+    }
     if (!["/api/resolve", "/api/validate", "/api/screen", "/api/microsite"].includes(pathname)) {
       send(res, 404, { error: "not_found", message: "Not found." });
       return;
@@ -321,6 +363,54 @@ export function createApp(options = {}) {
       return;
     }
     const prepared = pathname === "/api/resolve" ? parseResolveInput(json) : parseValidateInput(json);
+    if (pathname === "/api/validate" && prepared.mode === "live") {
+      const decision = spend.accept(json.spend_token, session.email, prepared);
+      if (!decision.ok) {
+        const capped = decision.reason === "spend_cap_exceeded";
+        send(res, 403, {
+          error: capped ? "spend_cap_exceeded" : "spend_not_confirmed",
+          message: spendRefusal(decision.reason)
+        });
+        return;
+      }
+      if (!liveEnabled(env)) {
+        send(res, 403, {
+          error: "live_mode_disabled",
+          message: "Live DataForSEO calls are off. Set DATAFORSEO_LIVE=true on the server to opt in. Example data was not substituted."
+        });
+        return;
+      }
+      if (!credentialsReady(env)) {
+        send(res, 503, {
+          error: "credentials_missing",
+          message: "Live mode is on but DATAFORSEO_LOGIN and DATAFORSEO_PASSWORD are not set. No DataForSEO request was sent."
+        });
+        return;
+      }
+      const perIp = liveLimiter.check(clientIp(req));
+      if (!perIp.allowed) {
+        rejectRate(res, perIp);
+        return;
+      }
+      const globalDecision = globalLiveLimiter.check("global");
+      if (!globalDecision.allowed) {
+        rejectRate(res, globalDecision);
+        return;
+      }
+      const cached = spend.freshResult(decision.bind);
+      if (cached) {
+        send(res, 200, cached);
+        return;
+      }
+      const report = await (options.validateImpl || validateNiche)(prepared, depsFor("live"));
+      const sent = Boolean(report.demand && report.demand.sent_to_dataforseo) || Boolean(report.maps && report.maps.sent_to_dataforseo);
+      if (sent) await spend.record(report, session.email, prepared);
+      if (report.demand && report.demand.status !== "failed" && report.maps && report.maps.status !== "failed") {
+        spend.remember(decision.bind, report);
+      }
+      send(res, 200, report);
+      return;
+    }
     if (prepared.mode === "live") {
       if (!liveEnabled(env)) {
         send(res, 403, {

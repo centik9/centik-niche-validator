@@ -226,7 +226,7 @@ async function loadMaps(prepared, resolution, deps) {
     keyword: prepared.niche,
     location_code: match.location_code,
     language_code: LANGUAGE_CODE,
-    depth: deps.origin === "live" ? 100 : MAPS_DEPTH,
+    depth: MAPS_DEPTH,
     device: MAPS_DEVICE,
     os: MAPS_OS,
     search_this_area: true

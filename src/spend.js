@@ -1,163 +1,236 @@
+import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { MAPS_PATH, SEARCH_VOLUME_PATH } from "./config.js";
 
 export const ADS_COST_USD = 0.09;
 export const MAPS_COST_USD = 0.002;
-export const CACHE_MS = 7 * 24 * 60 * 60 * 1000;
+export const QUERY_COST_USD = 0.092;
+export const MAPS_LIVE_DEPTH = 20;
+export const TOKEN_MS = 5 * 60 * 1000;
+export const RESULT_CACHE_MS = 24 * 60 * 60 * 1000;
 const SCALE = 1000;
 
 function milli(dollars) {
-  return Math.round(dollars * SCALE);
+  return Math.round(Number(dollars) * SCALE);
 }
 
 function dollars(units) {
   return Math.round(units) / SCALE;
 }
 
-export function endpointCostUsd(pathname) {
-  if (String(pathname).includes("search_volume")) return ADS_COST_USD;
-  if (String(pathname).includes("maps")) return MAPS_COST_USD;
-  return 0;
+export function paidCalls() {
+  return [
+    {
+      method: "POST",
+      path: SEARCH_VOLUME_PATH,
+      purpose: "Google Ads search volume and CPC",
+      estimated_cost_usd: ADS_COST_USD
+    },
+    {
+      method: "POST",
+      path: MAPS_PATH,
+      purpose: "Maps live advanced, top 20 organic competitors",
+      depth: MAPS_LIVE_DEPTH,
+      estimated_cost_usd: MAPS_COST_USD
+    }
+  ];
 }
 
-export function queryCostUsd() {
-  return dollars(milli(ADS_COST_USD) + milli(MAPS_COST_USD));
+export function bindSpendRequest(email, prepared) {
+  const ads = prepared.confirmed && prepared.confirmed.google_ads;
+  const maps = prepared.confirmed && prepared.confirmed.google_maps;
+  return {
+    email: String(email || "").trim().toLowerCase(),
+    niche: String(prepared.niche || "").trim().toLowerCase(),
+    city: String(prepared.city || "").trim().toLowerCase(),
+    state: String(prepared.state || "").trim().toLowerCase(),
+    country: String(prepared.countryCanonical || prepared.country || "").trim().toLowerCase(),
+    geography_type: prepared.geography_type || "city",
+    google_ads: ads ? ads.location_code : null,
+    google_maps: maps ? maps.location_code : null
+  };
 }
 
-function cacheKey(request) {
-  const task = Array.isArray(request.body) ? request.body[0] : null;
-  const niche = task && (task.keyword || (Array.isArray(task.keywords) ? task.keywords[0] : ""));
-  return `${request.path}|${String(niche || "").trim().toLowerCase()}|${task && task.location_code || ""}`;
+function sameBind(left, right) {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
-function dayKey(ms) {
-  return new Date(ms).toISOString().slice(0, 10);
+function cacheKey(bind) {
+  return `${bind.niche}|${bind.google_ads}|${bind.google_maps}`;
 }
 
-export function createSpendGuard(options = {}) {
+export function createSpendGate(options = {}) {
   const now = options.now || Date.now;
-  const totalUnits = milli(options.totalUsd ?? 10);
-  const dailyUnits = milli(options.dailyUsd ?? 5);
-  const ledger = [];
-  const cache = new Map();
-  const dataDir = options.dataDir || "";
+  const capUnits = milli(options.capUsd ?? 10);
+  const ledgerPath = options.ledgerPath || "";
+  const tokenSecret = options.tokenSecret || "";
+  const entries = [];
+  const results = new Map();
+  const used = new Set();
 
   let ready = null;
   function load() {
     if (!ready) {
       ready = (async () => {
-        if (!dataDir) return;
+        if (!ledgerPath) return;
         try {
-          const savedLedger = JSON.parse(await fs.readFile(path.join(dataDir, "spend-ledger.json"), "utf8"));
-          if (Array.isArray(savedLedger)) ledger.push(...savedLedger);
+          const saved = JSON.parse(await fs.readFile(ledgerPath, "utf8"));
+          if (saved && Array.isArray(saved.entries)) entries.push(...saved.entries);
         } catch {
-          // A new directory has no ledger yet.
-        }
-        try {
-          const savedCache = JSON.parse(await fs.readFile(path.join(dataDir, "result-cache.json"), "utf8"));
-          if (Array.isArray(savedCache)) {
-            for (const entry of savedCache) {
-              if (entry && entry.key && entry.expires > now()) cache.set(entry.key, entry);
-            }
-          }
-        } catch {
-          // The cache file is optional.
+          // A new ledger file is created on the first paid call.
         }
       })();
     }
     return ready;
   }
-
   load();
-  let tail = Promise.resolve();
 
   async function persist() {
-    if (!dataDir) return;
+    if (!ledgerPath) return;
     try {
-      await fs.mkdir(dataDir, { recursive: true });
-      await fs.writeFile(path.join(dataDir, "spend-ledger.json"), JSON.stringify(ledger));
-      await fs.writeFile(path.join(dataDir, "result-cache.json"), JSON.stringify([...cache.values()]));
+      await fs.mkdir(path.dirname(ledgerPath), { recursive: true });
+      await fs.writeFile(ledgerPath, JSON.stringify({ entries }));
     } catch {
-      // The in-memory ledger still stops this process from overspending.
+      // The in-memory total still enforces the cap for this process.
     }
   }
 
-  function spent(match) {
-    return ledger.reduce((sum, entry) => sum + (match(entry) ? entry.units : 0), 0);
+  function spentUnits() {
+    return entries.reduce((sum, entry) => sum + milli(entry.cost_usd || 0), 0);
   }
 
   function totals() {
-    const today = dayKey(now());
+    const spent = dollars(spentUnits());
     return {
-      total_usd: dollars(spent(() => true)),
-      daily_usd: dollars(spent((entry) => entry.day === today)),
-      budget_total_usd: dollars(totalUnits),
-      budget_daily_usd: dollars(dailyUnits),
-      query_cost_usd: queryCostUsd(),
+      spent_usd: spent,
+      cap_usd: dollars(capUnits),
+      remaining_usd: dollars(Math.max(0, capUnits - spentUnits())),
+      query_cost_usd: QUERY_COST_USD,
       ads_cost_usd: ADS_COST_USD,
       maps_cost_usd: MAPS_COST_USD,
-      calls: ledger.map((entry) => ({
-        at: entry.at,
-        endpoint: entry.endpoint,
-        niche: entry.niche,
-        location_code: entry.location_code,
-        cost_usd: dollars(entry.units)
-      }))
+      entries: entries.map((entry) => ({ ...entry }))
     };
   }
 
-  async function readCache(request) {
-    await ready;
-    const hit = cache.get(cacheKey(request));
-    if (!hit || hit.expires <= now() || hit.value == null) return null;
+  function roomFor(costUsd) {
+    return spentUnits() + milli(costUsd) <= capUnits;
+  }
+
+  function signToken(bind) {
+    const body = { bind, exp: now() + TOKEN_MS, nonce: crypto.randomBytes(16).toString("hex") };
+    const payload = Buffer.from(JSON.stringify(body)).toString("base64url");
+    const mac = crypto.createHmac("sha256", tokenSecret).update(payload).digest("base64url");
+    return { token: `${payload}.${mac}`, exp: body.exp };
+  }
+
+  function readToken(token) {
+    if (!tokenSecret || typeof token !== "string" || !token.includes(".")) return { ok: false, reason: "missing" };
+    const [payload, mac] = token.split(".");
+    if (!payload || !mac) return { ok: false, reason: "missing" };
+    const expected = crypto.createHmac("sha256", tokenSecret).update(payload).digest("base64url");
+    const left = Buffer.from(mac);
+    const right = Buffer.from(expected);
+    if (left.length !== right.length || !crypto.timingSafeEqual(left, right)) return { ok: false, reason: "bad_signature" };
+    let body;
+    try {
+      body = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    } catch {
+      return { ok: false, reason: "bad_signature" };
+    }
+    if (!body || !body.bind || !body.nonce || !Number.isFinite(body.exp)) return { ok: false, reason: "bad_signature" };
+    if (body.exp <= now()) return { ok: false, reason: "expired" };
+    if (used.has(body.nonce)) return { ok: false, reason: "reused" };
+    return { ok: true, body };
+  }
+
+  async function quote(email, prepared) {
+    await load();
+    if (!tokenSecret) {
+      const error = new Error("SPEND_TOKEN_SECRET must be set before a paid check can be confirmed.");
+      error.code = "spend_not_configured";
+      error.status = 503;
+      throw error;
+    }
+    const bind = bindSpendRequest(email, prepared);
+    const hit = freshResult(bind);
+    const cost = hit ? 0 : QUERY_COST_USD;
+    if (!roomFor(cost)) {
+      const error = new Error("This check would pass the spend cap. No DataForSEO request was sent.");
+      error.code = "spend_cap_exceeded";
+      error.status = 403;
+      throw error;
+    }
+    const signed = signToken(bind);
+    const state = totals();
+    return {
+      calls: hit ? [] : paidCalls(),
+      cache_hit: Boolean(hit),
+      estimated_cost_usd: cost,
+      spent_usd: state.spent_usd,
+      remaining_usd: state.remaining_usd,
+      cap_usd: state.cap_usd,
+      spend_token: signed.token,
+      expires_at: new Date(signed.exp).toISOString(),
+      niche: prepared.niche,
+      market: `${prepared.city}, ${prepared.state}`
+    };
+  }
+
+  function accept(token, email, prepared) {
+    const parsed = readToken(token);
+    if (!parsed.ok) return parsed;
+    const bind = bindSpendRequest(email, prepared);
+    if (!sameBind(parsed.body.bind, bind)) return { ok: false, reason: "mismatched" };
+    const hit = freshResult(bind);
+    const cost = hit ? 0 : QUERY_COST_USD;
+    if (!roomFor(cost)) return { ok: false, reason: "spend_cap_exceeded", status: 403 };
+    used.add(parsed.body.nonce);
+    return { ok: true, bind, cache_hit: Boolean(hit), estimated_cost_usd: cost };
+  }
+
+  function freshResult(bind) {
+    const hit = results.get(cacheKey(bind));
+    if (!hit || hit.expires <= now()) return null;
     return hit.value;
   }
 
-  function reserve(request) {
-    const run = tail.then(() => reserveNow(request));
-    tail = run.then(() => {}, () => {});
-    return run;
+  function remember(bind, value) {
+    results.set(cacheKey(bind), { expires: now() + RESULT_CACHE_MS, value });
   }
 
-  async function reserveNow(request) {
-    await ready;
-    const units = milli(endpointCostUsd(request.path));
-    const today = dayKey(now());
-    if (spent(() => true) + units > totalUnits || spent((entry) => entry.day === today) + units > dailyUnits) {
-      const error = new Error("Paid calls are stopped because this query would pass the budget. No DataForSEO request was sent.");
-      error.code = "budget_exceeded";
-      throw error;
+  function reportedCost(field, fallback) {
+    if (field && (field.status === "measured" || field.status === "measured_zero") && typeof field.value === "number") {
+      return field.value;
     }
-    const task = Array.isArray(request.body) ? request.body[0] : {};
-    ledger.push({
+    return fallback;
+  }
+
+  async function record(report, email, prepared) {
+    const calls = [
+      {
+        endpoint: `POST ${SEARCH_VOLUME_PATH}`,
+        cost_usd: reportedCost(report.demand && report.demand.provider_reported_cost_usd, ADS_COST_USD),
+        cost_source: report.demand && report.demand.provider_reported_cost_usd && report.demand.provider_reported_cost_usd.status === "measured" ? "provider" : "estimate_fallback"
+      },
+      {
+        endpoint: `POST ${MAPS_PATH}`,
+        cost_usd: reportedCost(report.maps && report.maps.provider_reported_cost_usd, MAPS_COST_USD),
+        cost_source: report.maps && report.maps.provider_reported_cost_usd && report.maps.provider_reported_cost_usd.status === "measured" ? "provider" : "estimate_fallback"
+      }
+    ];
+    const cost = dollars(calls.reduce((sum, call) => sum + milli(call.cost_usd), 0));
+    entries.push({
       at: new Date(now()).toISOString(),
-      day: today,
-      endpoint: request.path,
-      niche: task.keyword || (Array.isArray(task.keywords) ? task.keywords[0] : ""),
-      location_code: task.location_code || null,
-      units
+      user: String(email || "").trim().toLowerCase(),
+      niche: prepared.niche,
+      market: `${prepared.city}, ${prepared.state}`,
+      calls,
+      cost_usd: cost
     });
     await persist();
+    return cost;
   }
 
-  async function store(request, value) {
-    cache.set(cacheKey(request), { key: cacheKey(request), expires: now() + CACHE_MS, value });
-    await persist();
-  }
-
-  return { load, ready, readCache, reserve, store, totals };
-}
-
-export function guardTransport(transport, guard) {
-  return {
-    async request(request) {
-      if (request.method === "GET") return transport.request(request);
-      const hit = await guard.readCache(request);
-      if (hit) return hit;
-      await guard.reserve(request);
-      const value = await transport.request(request);
-      await guard.store(request, value);
-      return value;
-    }
-  };
+  return { load, ready: load(), totals, quote, accept, freshResult, remember, record, roomFor };
 }

@@ -13,14 +13,22 @@ async function resolveAndValidate(port, niche, place = { city: "Austin", state: 
     location_name: match.location_name,
     location_type: match.location_type
   } : null;
+  const confirmed = {
+    google_ads: side(resolution.google_ads.match),
+    google_maps: side(resolution.google_maps.match)
+  };
+  let spend_token;
+  if (mode === "live") {
+    const quoted = await postJson(port, "/api/quote", { mode, niche, ...place, confirmed });
+    const quote = await quoted.json();
+    spend_token = quote.spend_token;
+  }
   const response = await postJson(port, "/api/validate", {
     mode,
     niche,
     ...place,
-    confirmed: {
-      google_ads: side(resolution.google_ads.match),
-      google_maps: side(resolution.google_maps.match)
-    }
+    spend_token,
+    confirmed
   });
   return { status: response.status, body: await response.json(), resolution };
 }
@@ -94,8 +102,8 @@ test("live mode is exact and does not substitute example data", async () => {
       country: "United States",
       confirmed: { google_ads: null, google_maps: null }
     });
-    assert.equal(response.status, 503);
-    assert.equal((await response.json()).error, "credentials_missing");
+    assert.equal(response.status, 403);
+    assert.equal((await response.json()).error, "spend_not_confirmed");
     assert.equal(fetches, 0);
   });
 });

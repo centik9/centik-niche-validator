@@ -110,6 +110,7 @@ export function parseValidateInput(raw) {
     ...locationParts(body),
     niche,
     mode: parseMode(body.mode),
+    geography_type: "city",
     margin_index: parseMarginIndex(body.margin_index),
     margin_estimated: body.margin_estimated === true,
     confirmed: {

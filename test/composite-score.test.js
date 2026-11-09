@@ -47,7 +47,7 @@ test("a missing price withholds the composite instead of using zero", () => {
     exampleRelativeDemand: 100,
     exampleMonthlySearches: 1200,
     exampleCompetitorCount: 0,
-    price: priceFor("repipe")
+    price: priceFor("not-a-priced-job")
   });
   assert.equal(priced.status, "calculated");
   assert.equal(priced.composite_display, "70.0");

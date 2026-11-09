@@ -126,11 +126,11 @@ Copy the names from `.env.example`. Put real values in the host environment, not
 | `DATAFORSEO_LOGIN` | DataForSEO API login. Required only when live mode is on. Never put the real value in git or in a client file. |
 | `DATAFORSEO_PASSWORD` | DataForSEO API password. Same rule as the login. |
 | `DATAFORSEO_LIVE` | Must be the exact string `true` to allow live calls. `TRUE`, `1`, and `yes` leave live mode off. |
-| `BUDGET_USD_TOTAL` | Hard ceiling for paid calls in this process, in USD. Default `10`. A query that would pass it is refused before the request is sent. |
-| `BUDGET_USD_DAILY` | Per-day ceiling in USD. Default `5`. The day is the UTC date on the ledger timestamp. |
-| `DATA_DIR` | Directory for `spend-ledger.json` and `result-cache.json`. If it is missing or not writable, the guard keeps both in memory for this process only. On Render, `/tmp/centik-data` is used and is wiped on restart. |
+| `SPEND_CAP_USD` | Total cap for paid calls, in USD. Default `10`. A quote or a live run that would pass it is refused before anything is sent. |
+| `SPEND_LEDGER_PATH` | JSON ledger of paid calls. Default `./data/spend-ledger.json`. Each row stores the timestamp, user, niche, market, calls, and the cost DataForSEO returned. |
+| `SPEND_TOKEN_SECRET` | HMAC key for the one-time spend token. There is no default. |
 | `ALLOWED_EMAILS` | Comma-separated emails that may sign in. Default `team@centik.ai`. |
-| `TEAM_ACCESS_CODE` | Shared access code. There is no default. Sign-in returns 503 until this and `SESSION_SECRET` are set. |
+| `TEAM_ACCESS_CODE_HASH` | scrypt hash of the access code. Generate it with `node scripts/hash-access-code.mjs`. The plain code is not stored. |
 | `SESSION_SECRET` | HMAC key for the session cookie. There is no default. |
 | `PORT` | Optional listen port. Defaults to 3000. Render sets this. The process binds `0.0.0.0`. |
 
@@ -140,11 +140,13 @@ Live calls use HTTP Basic auth and are not retried. The transport refuses any en
 
 Location lists are cached in process memory for six hours. The cache is lost on restart. Those GET requests are not charged and are not written to the spend ledger.
 
-A live check is about $0.09 for Google Ads search volume plus $0.002 for Maps, $0.092 together. The same niche, location code, and endpoint is served from a 7-day cache and is not paid again. `GET /api/spend` returns the ledger totals and requires the team session.
+A live check is about $0.09 for Google Ads search volume plus $0.002 for Maps, $0.092 together. Those two rates are `ADS_COST_USD` and `MAPS_COST_USD` in `src/spend.js`. Nothing is sent until a signed-in person gets a quote from `POST /api/quote` and sends that one-time token to `POST /api/validate`. The token is HMAC-signed with `SPEND_TOKEN_SECRET`, bound to the user and the normalized niche, city, state, country, and location codes, and it expires in 5 minutes. A used token is remembered in memory. The same niche and market is served from a 24-hour result cache and is not paid again. The ledger adds the task cost DataForSEO returns. `GET /api/spend` returns the totals and requires the session.
+
+Live competition does not use `max(3, round(28 − demand / 4))`. The live index is `round(0.5 × listing room + 0.3 × share with no website + 0.2 × (100 − review pressure))`. Listing room is `round(100 × (30 − min(unique organic listings, 30)) / 30)`. The no-website share is that count divided by the deduped organic count. Review pressure is the average `votes_count` in the sample, capped at 100.
 
 ## Team access
 
-Every page and API except `GET /health` and `/login` requires a session. The sign-in page asks for an email and an access code. The email must be in `ALLOWED_EMAILS`. The code is compared with `TEAM_ACCESS_CODE` by hashing both sides and using a constant-time compare. A match sets an HttpOnly, Secure, SameSite=Lax cookie named `centik_session`, signed with `SESSION_SECRET`, for 30 days. Login attempts are limited to 8 per 15 minutes per IP. The access code and the DataForSEO credentials are not in the client files.
+`GET /health` is open. `/login` and `/logout` are open so a person can sign in and clear the cookie. Every other page and `/api` route requires a session. The sign-in page asks for an email and an access code. The email must be in `ALLOWED_EMAILS`. The code is checked with scrypt against `TEAM_ACCESS_CODE_HASH`, so the plain code is never in the repo or the environment. A match sets an HttpOnly, Secure, SameSite=Lax cookie named `centik_session`, signed with `SESSION_SECRET`, for 12 hours. Login attempts are limited to 8 per 15 minutes per IP. The access code and the DataForSEO credentials are not in the client files.
 
 ## How demand and Maps are read
 
@@ -154,7 +156,7 @@ Search volume requests send one keyword, `language_code` `en`, `search_partners`
 
 CPC and the low/high top-of-page bids are Google Ads USD statistics. They are excluded from the index.
 
-Maps requests send the same keyword, `language_code` `en`, the confirmed Maps `location_code`, `device` `desktop`, `os` `windows`, and `search_this_area` `true`. Example mode uses depth 20. Live mode uses depth 100. `search_this_area: false` can pull listings from outside the displayed area, so it is not used.
+Maps requests send the same keyword, `language_code` `en`, the confirmed Maps `location_code`, `depth` 20, `device` `desktop`, `os` `windows`, and `search_this_area` `true`. `search_this_area: false` can pull listings from outside the displayed area, so it is not used.
 
 Organic `maps_search` rows are deduplicated by `place_id`, then `cid`, then normalized title plus address. `maps_paid_item` rows and `is_directory_item: true` rows are excluded from the organic count. Listings whose `address_info.city` differs from the query city stay in the sample and are counted; they are not silently dropped. DataForSEO documents `address_info.region` as a DMA region, so it is not used as a state filter.
 
@@ -245,23 +247,22 @@ Example location coverage is a small gazetteer: several Springfields, both Portl
 
 `render.yaml` defines one Node web service, plan `free`.
 
-- Build command: `npm install`
-- Start command: `npm start` (`node src/server.js`)
+- Build command: `npm ci`
+- Start command: `node src/server.js`
 - Health check: `GET /health`
 - Bind is `0.0.0.0:$PORT`. Render sets `PORT`.
-- `DATAFORSEO_LOGIN`, `DATAFORSEO_PASSWORD`, `TEAM_ACCESS_CODE`, and `SESSION_SECRET` are `sync: false` with no value in the file. Set them in the Dashboard. Do not commit them.
-- `DATAFORSEO_LIVE`, `BUDGET_USD_TOTAL`, `BUDGET_USD_DAILY`, `DATA_DIR`, and `ALLOWED_EMAILS` are also `sync: false`, with safe defaults (`false`, `10`, `5`, `/tmp/centik-data`, `team@centik.ai`).
-- The Render filesystem is ephemeral. The spend ledger under `DATA_DIR` does not survive a restart or spin-down. Free web services spin down after inactivity.
+- These keys are `sync: false` and have no value in the file: `DATAFORSEO_LIVE`, `DATAFORSEO_LOGIN`, `DATAFORSEO_PASSWORD`, `SPEND_CAP_USD`, `SPEND_TOKEN_SECRET`, `SESSION_SECRET`, `TEAM_ACCESS_CODE_HASH`, `ALLOWED_EMAILS`. Set them in the Dashboard. Do not commit them.
+- The free plan's disk is ephemeral, so `./data/spend-ledger.json` resets on redeploy or restart. The cap still applies for the life of that instance. A starter plan with a persistent disk is worth it once the ledger has to survive a deploy. Until then the free plan is enough.
 
 ## One cheap live check
 
 Do this once, after the secrets are set, and not from a test:
 
-1. Set `DATAFORSEO_LIVE=true`, `DATAFORSEO_LOGIN`, `DATAFORSEO_PASSWORD`, `TEAM_ACCESS_CODE`, and `SESSION_SECRET`. Leave the budgets at the defaults.
+1. Set `DATAFORSEO_LIVE=true`, `DATAFORSEO_LOGIN`, `DATAFORSEO_PASSWORD`, `SPEND_TOKEN_SECRET`, `SESSION_SECRET`, and `TEAM_ACCESS_CODE_HASH`. Leave `SPEND_CAP_USD` at 10.
 2. Sign in at `/login`.
-3. Run one live check for one keyword in one confirmed city.
-4. Expect one Google Ads call and one Maps call. `GET /api/spend` with the session cookie should show about $0.092.
-5. Run that same keyword and city again. The 7-day cache should answer it and the spend total should stay the same.
+3. Open one keyword in one city and press the paid-check button once.
+4. Expect one Google Ads call and one Maps call at depth 20. `GET /api/spend` should show the provider task costs, about $0.092 if DataForSEO bills the list prices.
+5. Run that same keyword and city again within 24 hours. The cache should answer it and the spend total should stay the same.
 
 Location-list lookups are free and cached. They are not part of the $0.092.
 
