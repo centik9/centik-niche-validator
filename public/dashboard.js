@@ -337,7 +337,7 @@ function renderQuote(quote, proposal) {
   $("pay-cancel").disabled = !quote || state.busy;
   $("paid-note").textContent = quote && quote.cache_hit
     ? "A saved result from the last 24 hours will be shown. It will not be billed again."
-    : "Google Ads search volume and Maps top 20. Location lists are free and are not in this cost.";
+    : "Google Ads search volume and Maps top 100. Location lists are free and are not in this cost.";
   $("paid-pill").textContent = quote && !quote.live_mode ? "Live off" : "Quote";
 }
 

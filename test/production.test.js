@@ -7,7 +7,7 @@ import { accessGranted, hashAccessCode, readSession, safeEqual, signSession, ver
 import { createApp } from "../src/app.js";
 import { competitionIndex } from "../src/composite-score.js";
 import { createExampleTransport } from "../src/example-transport.js";
-import { liveCompetitionIndex } from "../src/live-market.js";
+import { LISTING_ROOM_CAP, liveCompetitionIndex } from "../src/live-market.js";
 import { nearbyPlaces } from "../src/nearby.js";
 import { createLocationDirectory } from "../src/locations.js";
 import { accountSpentUsd, createSpendGate, QUERY_COST_USD } from "../src/spend.js";
@@ -104,7 +104,7 @@ test("login is required, rate limited, and does not put secrets in the client", 
   assert.equal(bundle.includes(TEST_CODE), false);
 });
 
-test("a live check uses Maps depth 20 and does not derive competition from demand", async () => {
+test("a live check uses Maps depth 100 and does not derive competition from demand", async () => {
   const example = createExampleTransport();
   const calls = [];
   const fetchImpl = async (url, init) => {
@@ -149,13 +149,16 @@ test("a live check uses Maps depth 20 and does not derive competition from deman
     const firstResponse = await postJson(port, "/api/validate", { ...payload, spend_token: quoted.spend_token });
     const first = await firstResponse.json();
     assert.equal(firstResponse.status, 200);
-    assert.equal(first.maps.requested_depth, 20);
+    assert.equal(first.maps.requested_depth, 100);
+    assert.equal(quoted.estimated_cost_usd, 0.092);
+    assert.equal(quoted.calls.find((call) => call.path.endsWith("/maps/live/advanced")).depth, 100);
+    assert.equal(quoted.calls.find((call) => call.path.endsWith("/maps/live/advanced")).estimated_cost_usd, 0.002);
     assert.equal(first.city_market.live, true);
     assert.equal(first.city_market.demand_label, "Live Google data");
     assert.equal(first.city_market.competition_label, "Live Google data");
     const mapsCall = calls.find((call) => call.path.endsWith("/maps/live/advanced"));
     const volumeCall = calls.find((call) => call.path.endsWith("/search_volume/live"));
-    assert.equal(mapsCall.body[0].depth, 20);
+    assert.equal(mapsCall.body[0].depth, 100);
     assert.ok(volumeCall);
     const derivedCount = Math.max(3, Math.round(28 - first.city_market.demand_index / 4));
     assert.notEqual(first.city_market.competition_index, competitionIndex(derivedCount));
@@ -398,4 +401,8 @@ test("live competition index uses listings, missing websites, and reviews", () =
   assert.equal(liveCompetitionIndex({ listings: null, withoutWebsite: 0, averageReviews: 0 }), null);
   const derived = competitionIndex(Math.max(3, Math.round(28 - 80 / 4)));
   assert.notEqual(open, derived);
+  assert.equal(LISTING_ROOM_CAP, 100);
+  const forty = liveCompetitionIndex({ listings: 40, withoutWebsite: 0, averageReviews: 0 });
+  const ninety = liveCompetitionIndex({ listings: 90, withoutWebsite: 0, averageReviews: 0 });
+  assert.ok(forty > ninety);
 });

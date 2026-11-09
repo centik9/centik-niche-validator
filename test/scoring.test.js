@@ -40,7 +40,7 @@ async function validateExample(niche, city = "Austin", state = "Texas", country 
   return validateNiche({ niche, city, state, country, confirmed: confirmedFrom(resolution) }, deps);
 }
 
-test("default example report calculates 62.8 and labels itself as fixture data", async () => {
+test("default example report calculates 79.6 and labels itself as fixture data", async () => {
   const report = await validateExample("emergency plumber");
   assert.equal(report.example_data, true);
   assert.match(report.example_banner, /Example data/);
@@ -49,7 +49,7 @@ test("default example report calculates 62.8 and labels itself as fixture data",
   assert.equal(report.market_measurement.buyers_verified, false);
   assert.equal(report.market_measurement.economic_value_estimated, false);
   assert.equal(report.score.overall_status, "calculated");
-  assert.equal(report.score.overall_display, "62.8");
+  assert.equal(report.score.overall_display, "79.6");
   assert.equal(report.score.score_is_recommendation, false);
   assert.equal(report.score.weights.demand_index, "0.65");
   assert.equal(report.score.confidence.display, "0.65");
@@ -59,7 +59,7 @@ test("default example report calculates 62.8 and labels itself as fixture data",
   assert.equal(report.demand.search_volume.period.observed_end, "2024-12");
   assert.equal(report.demand.cpc.excluded_from_score, true);
   assert.equal(report.demand.cpc.unit, "USD per click");
-  assert.equal(report.maps.requested_depth, 20);
+  assert.equal(report.maps.requested_depth, 100);
   assert.equal(report.maps.deduplication.unique_organic_listings.value, 12);
   assert.equal(report.maps.se_results_count.status, "inconsistent");
   assert.equal(report.maps.se_results_count.used_in_score, false);
@@ -86,7 +86,7 @@ test("measured zero demand is scored and measured zero CPC stays zero", async ()
   assert.equal(report.demand.search_volume.value, 0);
   assert.equal(report.demand.cpc.status, "measured_zero");
   assert.equal(report.score.overall_status, "calculated");
-  assert.equal(report.score.overall_display, "14.0");
+  assert.equal(report.score.overall_display, "30.8");
   assert.equal(report.score.inputs.demand_index, 0);
 });
 
@@ -107,7 +107,7 @@ test("a calculated zero is distinct from a withheld index", async () => {
   assert.equal(report.score.overall_tenths, 0);
   assert.equal(report.score.confidence.display, "0.55");
   assert.equal(report.maps.se_results_count.value, 1000);
-  assert.equal(report.score.inputs.unique_organic_listings, 20);
+  assert.equal(report.score.inputs.unique_organic_listings, 100);
 });
 
 test("dedupes Maps rows and excludes paid and directory items", async () => {
@@ -117,14 +117,14 @@ test("dedupes Maps rows and excludes paid and directory items", async () => {
   assert.equal(report.maps.deduplication.paid_items, 2);
   assert.equal(report.maps.deduplication.directory_items_excluded, 1);
   assert.equal(report.maps.deduplication.paid_overlap_with_organic, 1);
-  assert.equal(report.score.overall_display, "78.5");
+  assert.equal(report.score.overall_display, "82.7");
   assert.equal(report.maps.claimed.note.includes("Buyers are not verified."), true);
 });
 
 test("failed and missing optional fields do not invent measurements", async () => {
   const missingCpc = await validateExample("missing cpc");
   assert.equal(missingCpc.demand.cpc.status, "missing");
-  assert.equal(missingCpc.score.overall_display, "62.8");
+  assert.equal(missingCpc.score.overall_display, "79.6");
   const mapsFailed = await validateExample("maps failed");
   assert.equal(mapsFailed.maps.status, "failed");
   assert.equal(mapsFailed.score.overall, null);
@@ -143,13 +143,13 @@ test("failed and missing optional fields do not invent measurements", async () =
   assert.equal(uneven.demand.monthly_crosscheck.differs_from_search_volume, true);
   assert.equal(uneven.demand.search_volume.value, 80);
   assert.equal(uneven.score.inputs.demand_index, 55);
-  assert.equal(uneven.score.overall_display, "49.8");
+  assert.equal(uneven.score.overall_display, "66.6");
 });
 
 test("a near-match fixture phrase is not special-cased", async () => {
   const report = await validateExample("missing volume extra");
   assert.equal(report.demand.search_volume.status, "measured");
-  assert.equal(report.score.overall_display, "62.8");
+  assert.equal(report.score.overall_display, "79.6");
 });
 
 test("buildScore withholds non-integer volume", () => {
@@ -161,7 +161,7 @@ test("buildScore withholds non-integer volume", () => {
       location: null
     },
     maps: {
-      requested_depth: 20,
+      requested_depth: 100,
       deduplication: { unique_organic_listings: { status: "measured", value: 4 } },
       se_results_count: { status: "missing" },
       address_flags: { listings_with_different_address_city: 0 },

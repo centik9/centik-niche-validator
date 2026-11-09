@@ -6,7 +6,7 @@ import { MAPS_PATH, SEARCH_VOLUME_PATH } from "./config.js";
 export const ADS_COST_USD = 0.09;
 export const MAPS_COST_USD = 0.002;
 export const QUERY_COST_USD = 0.092;
-export const MAPS_LIVE_DEPTH = 20;
+export const MAPS_LIVE_DEPTH = 100;
 export const TOKEN_MS = 5 * 60 * 1000;
 export const RESULT_CACHE_MS = 24 * 60 * 60 * 1000;
 const SCALE = 1000;
@@ -49,7 +49,7 @@ export function paidCalls() {
     {
       method: "POST",
       path: MAPS_PATH,
-      purpose: "Maps live advanced, top 20 organic competitors",
+      purpose: "Maps live advanced, top 100 organic competitors",
       depth: MAPS_LIVE_DEPTH,
       estimated_cost_usd: MAPS_COST_USD
     }

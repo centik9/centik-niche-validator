@@ -35,7 +35,7 @@ A validation report has three separate pieces:
 
 - **Demand.** Approximate average monthly Google searches for one keyword, from Google Ads via DataForSEO `POST /v3/keywords_data/google_ads/search_volume/live`. CPC, top-of-page bids, and paid-search competition are shown beside it and are not part of the index.
 - **Maps sample.** Deduplicated organic listings from `POST /v3/serp/google/maps/live/advanced` with `depth` fixed at 20. Paid items and directory items are counted separately and excluded from the organic sample.
-- **Heuristic index.** A weighted combination of a demand band and how full that 20-listing sample was. The formula, weights, inputs, completeness, and confidence adjustments are in every response. The combined index is withheld when it would have to be invented.
+- **Heuristic index.** A weighted combination of a demand band and how full that 100-listing sample was. The formula, weights, inputs, completeness, and confidence adjustments are in every response. The combined index is withheld when it would have to be invented.
 
 `market_measurement.exhaustive_market`, `buyers_verified`, and `economic_value_estimated` are always `false`.
 
@@ -68,7 +68,7 @@ The process binds `0.0.0.0` and listens on `PORT`, or 3000 if `PORT` is unset. O
 
 The form asks for a niche keyword plus city, state, and country as separate fields. Resolve a location, confirm that the returned city is the one you meant, then run a validation.
 
-The primary actions use example mode. Live buttons stay disabled unless `/health` reports `live_mode: true`, and the server still rejects a live request unless it was started with the opt-in below. A withheld index is labeled **Withheld**. It is not displayed as 0. A calculated `0.0` is a real result of the formula (measured zero demand and a full 20-listing sample).
+The primary actions use example mode. Live buttons stay disabled unless `/health` reports `live_mode: true`, and the server still rejects a live request unless it was started with the opt-in below. A withheld index is labeled **Withheld**. It is not displayed as 0. A calculated `0.0` is a real result of the formula (measured zero demand and a full 100-listing sample).
 
 ## HTTP API
 
@@ -137,13 +137,13 @@ Copy the names from `.env.example`. Put real values in the host environment, not
 
 There is no `.env` loader. A file named `.env` is gitignored so it is not committed; this process does not read it. Inject the variables in the shell or the host.
 
-Live calls use HTTP Basic auth and are not retried. The transport refuses any endpoint other than the two uncharged location lists, the search-volume live call, and the Maps live call. It refuses `location_name`, `location_coordinate`, custom date ranges, more than one keyword, `search_partners: true`, and any Maps depth other than 20 (example) or 100 (live). Request bodies that contain the login or password are refused before send. Logs and error responses pass through a redactor for those values and for `Authorization: Basic` tokens.
+Live calls use HTTP Basic auth and are not retried. The transport refuses any endpoint other than the two uncharged location lists, the search-volume live call, and the Maps live call. It refuses `location_name`, `location_coordinate`, custom date ranges, more than one keyword, `search_partners: true`, and any Maps depth other than 100. Request bodies that contain the login or password are refused before send. Logs and error responses pass through a redactor for those values and for `Authorization: Basic` tokens.
 
 Location lists are cached in process memory for six hours. The cache is lost on restart. Those GET requests are not charged and are not written to the spend ledger.
 
 A live check is about $0.09 for Google Ads search volume plus $0.002 for Maps, $0.092 together. Those two rates are `ADS_COST_USD` and `MAPS_COST_USD` in `src/spend.js`. Nothing is sent until a signed-in person gets a quote from `POST /api/quote` and sends that one-time token to `POST /api/validate`. The token is HMAC-signed with `SPEND_TOKEN_SECRET`, bound to the user and the normalized niche, city, state, country, and location codes, and it expires in 5 minutes. A used token is remembered in memory. The same niche and market is served from a 24-hour result cache and is not paid again. The ledger adds the task cost DataForSEO returns. `GET /api/spend` returns the totals and requires the session.
 
-Live competition does not use `max(3, round(28 − demand / 4))`. The live index is `round(0.5 × listing room + 0.3 × share with no website + 0.2 × (100 − review pressure))`. Listing room is `round(100 × (30 − min(unique organic listings, 30)) / 30)`. The no-website share is that count divided by the deduped organic count. Review pressure is the average `votes_count` in the sample, capped at 100.
+Live competition does not use `max(3, round(28 − demand / 4))`. The live index is `round(0.5 × listing room + 0.3 × share with no website + 0.2 × (100 − review pressure))`. Listing room is `round(100 × (100 − min(unique organic listings, 100)) / 100)`, so 40 listings scores differently from 90. The no-website share is that count divided by the deduped organic count. Review pressure is the average `votes_count` in the sample, capped at 100.
 
 ## Team access
 
@@ -157,7 +157,7 @@ Search volume requests send one keyword, `language_code` `en`, `search_partners`
 
 CPC and the low/high top-of-page bids are Google Ads USD statistics. They are excluded from the index.
 
-Maps requests send the same keyword, `language_code` `en`, the confirmed Maps `location_code`, `depth` 20, `device` `desktop`, `os` `windows`, and `search_this_area` `true`. `search_this_area: false` can pull listings from outside the displayed area, so it is not used.
+Maps requests send the same keyword, `language_code` `en`, the confirmed Maps `location_code`, `depth` 100, `device` `desktop`, `os` `windows`, and `search_this_area` `true`. Depth 100 is one billed Maps SERP, the same $0.002 as a 20-result call. `search_this_area: false` can pull listings from outside the displayed area, so it is not used.
 
 Organic `maps_search` rows are deduplicated by `place_id`, then `cid`, then normalized title plus address. `maps_paid_item` rows and `is_directory_item: true` rows are excluded from the organic count. Listings whose `address_info.city` differs from the query city stay in the sample and are counted; they are not silently dropped. DataForSEO documents `address_info.region` as a DMA region, so it is not used as a state filter.
 
@@ -183,7 +183,7 @@ The top band is 90 so a large volume is not shown as 100. Non-integers are `unus
 Sample openness:
 
 ```text
-100 - (100 * min(unique_organic_listings, 20) / 20)
+100 - (100 * min(unique_organic_listings, 100) / 100)
 ```
 
 Combined index, only when both inputs are measured numbers and the unique organic count is greater than zero:
@@ -192,7 +192,7 @@ Combined index, only when both inputs are measured numbers and the unique organi
 round_half_up((65 * demand_index + 35 * sample_openness) / 10) / 10
 ```
 
-Rounding uses that integer expression so binary floating point does not choose the tenth. The default example fixture (320 searches, 12 unique listings, openness 40) is `62.8`.
+Rounding uses that integer expression so binary floating point does not choose the tenth. The default example fixture (320 searches, 12 unique listings, openness 88) is `79.6`.
 
 The combined index is withheld when:
 
@@ -202,11 +202,11 @@ The combined index is withheld when:
 
 Measured zero demand is still a measurement. It can enter the index when the Maps sample is a non-zero measured count.
 
-Measured zero demand with a non-empty measured sample still produces an index. The demand index is 0, so the result only reflects unfilled slots in a 20-listing sample. The default example niche `zero volume` is `14.0`. The niche `zero volume saturated` is a calculated `0.0`, which is different from a withheld index.
+Measured zero demand with a non-empty measured sample still produces an index. The demand index is 0, so the result only reflects unfilled slots in a 100-listing sample. The default example niche `zero volume` is `30.8`. The niche `zero volume saturated` is a calculated `0.0`, which is different from a withheld index.
 
 Completeness is how many of the two required inputs were measured. CPC is not required.
 
-Confidence is reported in hundredths only when the combined index is calculated. It starts at 35. It adds 15 when at least six monthly values are numeric, plus 5 more when at least twelve are numeric, plus 10 when both locations are City or Municipality. It subtracts 10 when the organic sample fills the depth cap, and 5 when the keyword was spell-corrected. The result is clamped between 20 and 75 hundredths. The cap is 0.75 because this is one English keyword and a 20-row Maps sample. It is not a probability that a niche will succeed. Confidence is withheld together with the index so missing demand cannot look confident.
+Confidence is reported in hundredths only when the combined index is calculated. It starts at 35. It adds 15 when at least six monthly values are numeric, plus 5 more when at least twelve are numeric, plus 10 when both locations are City or Municipality. It subtracts 10 when the organic sample fills the depth cap, and 5 when the keyword was spell-corrected. The result is clamped between 20 and 75 hundredths. The cap is 0.75 because this is one English keyword and a 100-row Maps sample. It is not a probability that a niche will succeed. Confidence is withheld together with the index so missing demand cannot look confident.
 
 The worked example for a normal keyword in example mode uses confidence `0.65`.
 
@@ -216,11 +216,11 @@ These niches are exact, case-insensitive matches in example mode only:
 
 | Niche | What the fixture demonstrates |
 | --- | --- |
-| any other phrase | 320 average monthly searches, CPC 8.5 USD, 12 listings, one address city outside the query, `se_results_count` 0 alongside items, index 62.8 |
+| any other phrase | 320 average monthly searches, CPC 8.5 USD, 12 listings, one address city outside the query, `se_results_count` 0 alongside items, index 79.6 |
 | `missing volume` | null volume and CPC; combined index withheld |
-| `zero volume` | measured zero volume and CPC; index 14.0 |
-| `zero volume saturated` | measured zero volume and 20 listings; calculated 0.0 |
-| `missing cpc` | volume present, CPC null; index still 62.8 |
+| `zero volume` | measured zero volume and CPC; index 30.8 |
+| `zero volume saturated` | measured zero volume and 100 listings; calculated 0.0 |
+| `missing cpc` | volume present, CPC null; index still 79.6 |
 | `maps empty` | measured zero listings; index withheld |
 | `maps duplicates` | duplicate `place_id` and title/address, plus paid and directory rows |
 | `maps failed` / `maps timeout` / `demand failed` | component failure, not a zero |
@@ -262,7 +262,7 @@ Do this once, after the secrets are set, and not from a test:
 1. Set `DATAFORSEO_LIVE=true`, `DATAFORSEO_LOGIN`, `DATAFORSEO_PASSWORD`, `SPEND_TOKEN_SECRET`, `SESSION_SECRET`, and `TEAM_ACCESS_CODE_HASH`. Leave `SPEND_CAP_USD` at 10.
 2. Sign in at `/login`.
 3. Open one keyword in one city and press the paid-check button once.
-4. Expect one Google Ads call and one Maps call at depth 20. `GET /api/spend` should show the provider task costs, about $0.092 if DataForSEO bills the list prices.
+4. Expect one Google Ads call and one Maps call at depth 100. `GET /api/spend` should show the provider task costs, about $0.092 if DataForSEO bills the list prices. Maps depth 100 is still $0.002.
 5. Run that same keyword and city again within 24 hours. The cache should answer it and the spend total should stay the same.
 
 Location-list lookups are free and cached. They are not part of the $0.092.

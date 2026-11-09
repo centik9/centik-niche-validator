@@ -3,7 +3,7 @@ import { classifyNumber, field } from "./measurement.js";
 import { normalizePlace } from "./normalize.js";
 import { readTask } from "./provider.js";
 
-const DEPTH_NOTE = "This app requests depth 20, the top of the map pack. A returned sample is not exhaustive.";
+const DEPTH_NOTE = "This app requests depth 100. DataForSEO bills one Maps SERP for up to 100 results. A returned sample is not exhaustive.";
 const SE_NOTE = "DataForSEO documents se_results_count as the total number of results in the SERP. It is not a verified census of businesses, and it is never used in the score.";
 const REGION_NOTE = "DataForSEO documents address_info.region as the DMA region. Some responses put a state name there. This app does not use it as a verified state filter.";
 const CLAIMED_NOTE = "is_claimed means the Google listing has a claimed owner. Buyers are not verified.";

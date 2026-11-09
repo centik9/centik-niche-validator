@@ -17,7 +17,7 @@ export const DEMAND_BANDS = [
 
 export const FORMULA = {
   demand_index: "Select the inclusive band containing search_volume. The highest band index is 90, not 100.",
-  sample_openness: "100 - (100 * min(unique_organic_listings, requested_depth) / requested_depth). requested_depth is 20.",
+  sample_openness: "100 - (100 * min(unique_organic_listings, requested_depth) / requested_depth). requested_depth is 100.",
   overall: "round_half_up((65 * demand_index + 35 * sample_openness) / 10) / 10. Calculated only when both inputs are measured numbers and unique organic listings is greater than zero.",
   rounding: "The tenth is rounded half away from zero with integer arithmetic, so binary floating point does not decide it.",
   confidence: "Start at 35 hundredths. Add 15 when at least 6 monthly values are numeric, plus 5 more when at least 12 are numeric, plus 10 when both products resolved to City or Municipality. Subtract 10 when the organic sample fills the depth cap, and 5 when Google Ads spell-corrects the keyword. Clamp between 20 and 75 hundredths. Withheld when the combined index is withheld."
@@ -193,10 +193,10 @@ export function buildScore({ demand, maps, origin }) {
       interpretation.push("Average monthly searches were measured as 0. That is a measured zero, not missing data. The demand index is 0.");
     }
     if (flags.includes("maps_sample_sparse")) {
-      interpretation.push("The organic sample is under half of the 20 listings requested. A sparse sample can be a thin result, a query Maps did not treat as a local business search, or simply the first page of a larger set. It is not proof of an open market.");
+      interpretation.push(`The organic sample is under half of the ${depth} listings requested. A sparse sample can be a thin result, a query Maps did not treat as a local business search, or simply the first page of a larger set. It is not proof of an open market.`);
     }
     if (flags.includes("maps_sample_saturated")) {
-      interpretation.push("The sample cap was filled. The unique listing count is a lower bound, and sample openness is 0. This does not say the market has only 20 businesses.");
+      interpretation.push(`The sample cap was filled. The unique listing count is a lower bound, and sample openness is 0. This does not say the market has only ${depth} businesses.`);
     }
   }
   if (flags.includes("listings_outside_named_city")) {
