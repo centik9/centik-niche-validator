@@ -276,7 +276,19 @@ test("dashboard copy keeps the rerun label, stamp, and enlarge control", async (
     assert.match(html, new RegExp(`<h2[^>]*>${title}</h2>`));
   }
   assert.match(html, /id="card-scrim"/);
+  assert.match(html, /id="paid-warn"[^>]*hidden/);
+  assert.match(html, /id="paid-warn-text"/);
+  assert.match(html, /Nothing runs until you press Okay\./);
+  assert.match(dashboard, /Nothing runs until you confirm Rerun paid check\./);
+  assert.match(dashboard, /Saved check/);
+  assert.match(dashboard, /No sketch yet/);
+  assert.match(dashboard, /pill\.textContent = "Confirm"/);
+  assert.match(dashboard, /enlarge-home/);
   assert.match(css, /min\(1200px, 92vw\)/);
+  assert.match(css, /flex-wrap:\s*nowrap/);
+  assert.match(css, /\.enlarge\[hidden\], \.enlarge-close\[hidden\], \.warn\[hidden\], \.card-scrim\[hidden\]/);
+  assert.match(css, /z-index:\s*1000/);
+  assert.match(css, /z-index:\s*1001/);
   assert.match(css, /#fbbf24/);
   assert.match(css, /#1c1404/);
   assert.equal(dashboard.includes("\u2014"), false);
@@ -284,4 +296,6 @@ test("dashboard copy keeps the rerun label, stamp, and enlarge control", async (
   assert.equal(html.includes("\u2014"), false);
   assert.equal(html.includes("\u2013"), false);
   assert.equal(html.includes("Mesa"), false);
+  assert.equal(dashboard.includes("Las Vegas"), false);
+  assert.equal(html.includes("Las Vegas"), false);
 });

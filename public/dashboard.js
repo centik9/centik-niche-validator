@@ -113,7 +113,7 @@ function paintStepper() {
   const steps = [
     ["1. Service", state.subniche ? state.subniche.label : "Keyword"],
     ["2. Locations", state.location ? `${state.location.name}, ${state.location.state}` : "Pick a city"],
-    ["3. Microsite", state.proposal ? "Sketch ready" : "After a city"],
+    ["3. Microsite", (state.proposal && ((state.proposal.pages && state.proposal.pages.length) || state.proposal.suggested_domain)) ? "Sketch ready" : (state.location ? "No sketch yet" : "After a city")],
     ["4. Check", state.rerunArmed ? "Confirm the charge" : state.storedReport ? "Saved result" : state.quote ? "Waiting for your okay" : "Not quoted"]
   ];
   const current = state.quote || state.storedReport ? 3 : state.proposal ? 2 : state.cards.length ? 1 : 0;
@@ -410,9 +410,22 @@ function renderQuote(quote, proposal) {
   $("paid-note").textContent = stored
     ? "This starts a new paid DataForSEO run and will be charged."
     : breakdown;
+  const heading = $("h-paid");
+  if (heading) heading.textContent = stored && !state.rerunArmed ? "Saved check" : "Confirm paid check";
   const pill = $("paid-pill");
-  pill.textContent = stored ? "Cached" : quote && !quote.live_mode ? "Live off" : quote ? "Quote" : "Sample data";
-  pill.classList.toggle("cached", stored);
+  if (stored && state.rerunArmed) {
+    pill.textContent = "Confirm";
+    pill.classList.remove("cached");
+  } else {
+    pill.textContent = stored ? "Cached" : quote && !quote.live_mode ? "Live off" : quote ? "Quote" : "Sample data";
+    pill.classList.toggle("cached", stored);
+  }
+  const warnText = $("paid-warn-text");
+  if (warnText) {
+    warnText.textContent = stored
+      ? "This check costs money. Nothing runs until you confirm Rerun paid check."
+      : "This check costs money. Nothing runs until you press Okay.";
+  }
   paintStamp();
   paintStepper();
 }
@@ -846,6 +859,8 @@ function focusable(root) {
     .filter((node) => !node.hidden && node.getAttribute("aria-hidden") !== "true");
 }
 
+let enlargeHome = null;
+
 function closeEnlarged() {
   if (!enlargedCard) return;
   const card = enlargedCard;
@@ -859,6 +874,11 @@ function closeEnlarged() {
     open.hidden = false;
     open.setAttribute("aria-expanded", "false");
   }
+  if (enlargeHome && enlargeHome.parentNode) {
+    enlargeHome.parentNode.insertBefore(card, enlargeHome);
+    enlargeHome.remove();
+  }
+  enlargeHome = null;
   const scrim = $("card-scrim");
   scrim.classList.remove("open");
   document.body.classList.remove("card-focus");
@@ -884,6 +904,11 @@ function openEnlarged(card) {
   window.clearTimeout(enlargeTimer);
   scrim.hidden = false;
   document.body.classList.add("card-focus");
+  if (!enlargeHome) {
+    enlargeHome = document.createComment("enlarge-home");
+    card.parentNode.insertBefore(enlargeHome, card);
+    document.body.append(card);
+  }
   card.classList.add("is-enlarged");
   card.setAttribute("role", "dialog");
   card.setAttribute("aria-modal", "true");
