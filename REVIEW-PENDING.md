@@ -1,5 +1,7 @@
 # Pending Abel review
 
+Spend baseline: DataForSEO `GET /v3/appendix/user_data` returns `money.total` and `money.balance`, not `money.total_spent`. Account spend is `total − balance` when `total_spent` is absent. The production baseline, set once in `DATAFORSEO_SPENT_BASELINE_USD`, is the derived value `1.17145`.
+
 These sourced ranges were read on 2026-11-09 from the allowlist. `reviewed` is false. None of them may paint a row green. AiA can relay this list.
 
 ## Used on a row that had no reviewed price
