@@ -1,4 +1,5 @@
 import { scoreExampleMarket } from "./composite-score.js";
+import { nearbyPlaces, PLACES } from "./nearby.js";
 import { priceForServiceNiche } from "./niche-prices.js";
 import { rankByQuery } from "./query-match.js";
 import { HttpError } from "./errors.js";
@@ -52,6 +53,17 @@ const LOCATIONS = [
   { id: "hunt-county-tx", geography_type: "county", name: "Hunt County", state: "Texas", base: 42, example_deep_check: false },
   { id: "fulton-county-ga", geography_type: "county", name: "Fulton County", state: "Georgia", base: 67, example_deep_check: false }
 ];
+
+const SATELLITES = PLACES.filter((place) => place.nearby_only).map((place) => ({
+  id: place.id,
+  geography_type: "city",
+  name: place.name,
+  state: place.state,
+  base: place.base,
+  example_deep_check: false
+}));
+
+const PROPOSAL_PLACES = LOCATIONS.concat(SATELLITES);
 
 const SERVICE_NICHES = [
   ["plumbing", "Plumbing", 96],
@@ -336,6 +348,23 @@ export async function buildShortlist(body) {
   cards.sort((a, b) => b.example_relative_demand - a.example_relative_demand || a.name.localeCompare(b.name));
   cards.forEach((card, index) => {
     card.position = index + 1;
+    card.nearby_ids = nearbyPlaces(card.id).map((place) => place.id);
+  });
+  const nearbyCards = SATELLITES.map((location) => {
+    const demand = demandFor(location, subniche.id, suggestion.ranking_kind);
+    return {
+      id: location.id,
+      geography_type: "city",
+      name: location.name,
+      state: location.state,
+      country: "United States",
+      subniche_label: subniche.label,
+      example_relative_demand: demand.exampleRelativeDemand,
+      nearby_ids: nearbyPlaces(location.id).map((place) => place.id),
+      miles_note: "Example city inside about 45 miles of the selected market. Not a national shortlist row.",
+      example_deep_check: false,
+      deep_check_block: "This nearby example city is not in the deep-check gazetteer. No score is invented for a paid check."
+    };
   });
   return {
     model_id: FLOW_MODEL_ID,
@@ -350,14 +379,15 @@ export async function buildShortlist(body) {
     paid_dataforseo_called: false,
     context,
     subniche,
-    cards
+    cards,
+    nearby_cards: nearbyCards
   };
 }
 
 export function buildProposal(body) {
   const context = requireKeyword(body);
   const { suggestion, subniche } = selectedSubniche(context.keyword, body.subniche_id);
-  const location = LOCATIONS.find((item) => item.id === body.location_id);
+  const location = PROPOSAL_PLACES.find((item) => item.id === body.location_id);
   if (!location) throw new HttpError(400, "inconsistent_choice", "That location is not in the example shortlist.");
   const demand = demandFor(location, subniche.id, suggestion.ranking_kind);
   const price = subniche.price || priceFor(subniche.id);

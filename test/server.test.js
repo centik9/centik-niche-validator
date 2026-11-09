@@ -130,7 +130,7 @@ test("live opt-in uses the injected transport and product-specific codes", async
   const calls = [];
   const base = createExampleTransport();
   const app = createApp({
-    env: { ...TEST_AUTH,  DATAFORSEO_LIVE: "true", DATAFORSEO_LOGIN: "login-user", DATAFORSEO_PASSWORD: "test-password-value" },
+    env: { ...TEST_AUTH,  DATAFORSEO_LIVE: "true", DATAFORSEO_LOGIN: "login-user", DATAFORSEO_PASSWORD: "test-password-value", DATAFORSEO_SPENT_BASELINE_USD: "0" },
     liveTransport: {
       async request(args) {
         calls.push(args);

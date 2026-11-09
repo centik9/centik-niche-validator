@@ -1,4 +1,4 @@
-import { MAPS_PATH, SEARCH_VOLUME_PATH } from "./config.js";
+import { MAPS_PATH, SEARCH_VOLUME_PATH, USER_DATA_PATH } from "./config.js";
 import { assertSafeRequest } from "./dataforseo.js";
 import { DataForSeoError } from "./errors.js";
 import { exampleRows } from "./gazetteer.js";
@@ -200,6 +200,9 @@ export function createExampleTransport() {
   return {
     async request({ method, path, body }) {
       assertSafeRequest({ method, path, body });
+      if (method === "GET" && path === USER_DATA_PATH) {
+        return { tasks: [{ status_code: 20000, result: [{ money: { total_spent: 0 } }] }] };
+      }
       if (method === "GET" && /^\/v3\/(?:keywords_data\/google_ads|serp\/google)\/locations\/[a-z]{2}$/.test(path)) {
         const iso = path.slice(-2);
         const product = path.includes("google_ads") ? "google_ads" : "google_maps";

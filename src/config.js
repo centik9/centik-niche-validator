@@ -30,6 +30,7 @@ export const LIVE_BANNER = "Live DataForSEO response. Maps results are a capped 
 
 export const SEARCH_VOLUME_PATH = "/v3/keywords_data/google_ads/search_volume/live";
 export const MAPS_PATH = "/v3/serp/google/maps/live/advanced";
+export const USER_DATA_PATH = "/v3/appendix/user_data";
 
 export function adsLocationsPath(iso) {
   return `/v3/keywords_data/google_ads/locations/${iso}`;

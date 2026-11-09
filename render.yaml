@@ -13,6 +13,8 @@ services:
         sync: false
       - key: DATAFORSEO_PASSWORD
         sync: false
+      - key: DATAFORSEO_SPENT_BASELINE_USD
+        sync: false
       - key: SPEND_CAP_USD
         sync: false
       - key: SPEND_TOKEN_SECRET

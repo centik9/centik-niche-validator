@@ -31,7 +31,7 @@
       <div class="card-h"><span class="step">Step 3</span><h2 id="h-g">Market score</h2><span class="sp"></span><span class="sample" id="score-pill">Sample data</span></div>
       <p class="help" id="score-title">Pick a sub-niche and a city.</p>
       <div class="gauge-layout">
-        <div>
+        <div class="dial-block">
           <div id="dialwrap">
             <svg class="dial" viewBox="0 0 360 210" role="img" aria-label="Score gauge. Zones run from No to Max. No score yet.">
               <path d="M 68 168 A 112 112 0 0 1 292 168" fill="none" stroke="#0c111a" stroke-width="16"></path>
@@ -58,12 +58,10 @@
             <li data-zone="High"><i style="background:#a3e635"></i>High</li>
             <li data-zone="Max"><i style="background:#34d399"></i>Max</li>
           </ul>
-        </div>
-        <div>
-          <p class="score num"><span id="num">—</span><small>/ 100</small></p>
+          <p class="score-block"><span class="score num"><span id="num">—</span><small>/ 100</small></span><span id="chipwrap"></span></p>
           <p class="verdict" id="verdict">The score appears after you pick a city.</p>
-          <p class="help demand-note" id="demand-note"></p>
           <div class="bd" id="bd"></div>
+          <p class="help demand-note" id="demand-note"></p>
         </div>
       </div>
     </section>

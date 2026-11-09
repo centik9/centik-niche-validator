@@ -8,6 +8,7 @@ import { createApp } from "../src/app.js";
 import { competitionIndex } from "../src/composite-score.js";
 import { createExampleTransport } from "../src/example-transport.js";
 import { liveCompetitionIndex } from "../src/live-market.js";
+import { nearbyPlaces } from "../src/nearby.js";
 import { createLocationDirectory } from "../src/locations.js";
 import { createSpendGate, QUERY_COST_USD } from "../src/spend.js";
 import { confirmedFrom, postJson, sessionCookie, TEST_AUTH, TEST_CODE, withServer } from "./helpers.js";
@@ -119,7 +120,8 @@ test("a live check uses Maps depth 20 and does not derive competition from deman
       DATAFORSEO_LIVE: "true",
       DATAFORSEO_LOGIN: "login-user",
       DATAFORSEO_PASSWORD: "test-password-value",
-      SPEND_CAP_USD: "10"
+      SPEND_CAP_USD: "10",
+      DATAFORSEO_SPENT_BASELINE_USD: "0"
     },
     now: () => NOW,
     fetchImpl,
@@ -161,17 +163,17 @@ test("a live check uses Maps depth 20 and does not derive competition from deman
     assert.equal(first.city_market.listings_without_website, first.city_market.unique_listings);
     assert.equal(first.live_composite.status, "calculated");
     assert.match(first.city_market.formula, /does not use|instead of/);
-    const sent = calls.length;
+    const sent = calls.filter((call) => call.method === "POST").length;
     const again = await (await postJson(port, "/api/quote", payload)).json();
     assert.equal(again.cache_hit, true);
     assert.equal(again.estimated_cost_usd, 0);
     const second = await (await postJson(port, "/api/validate", { ...payload, spend_token: again.spend_token })).json();
-    assert.equal(calls.length, sent);
+    assert.equal(calls.filter((call) => call.method === "POST").length, sent);
     assert.equal(second.live_composite.composite_display, first.live_composite.composite_display);
     const reused = await postJson(port, "/api/validate", { ...payload, spend_token: quoted.spend_token });
     assert.equal(reused.status, 403);
     assert.equal((await reused.json()).error, "spend_not_confirmed");
-    assert.equal(calls.length, sent);
+    assert.equal(calls.filter((call) => call.method === "POST").length, sent);
   });
 });
 
@@ -188,9 +190,11 @@ test("the spend guard refuses a paid call at the budget and keeps location lists
       DATAFORSEO_LIVE: "true",
       DATAFORSEO_LOGIN: "login-user",
       DATAFORSEO_PASSWORD: "test-password-value",
+      DATAFORSEO_SPENT_BASELINE_USD: "0",
       SPEND_CAP_USD: "0"
     },
     now: () => NOW,
+    readAccountSpent: async () => 0,
     fetchImpl,
     liveDirectory: createLocationDirectory(example)
   });
@@ -233,9 +237,11 @@ test("a spend token is rejected when it is signed badly, expired, or for another
       ...TEST_AUTH,
       DATAFORSEO_LIVE: "true",
       DATAFORSEO_LOGIN: "login-user",
-      DATAFORSEO_PASSWORD: "test-password-value"
+      DATAFORSEO_PASSWORD: "test-password-value",
+      DATAFORSEO_SPENT_BASELINE_USD: "0"
     },
     now: () => NOW,
+    readAccountSpent: async () => 0,
     fetchImpl: async () => { fetches += 1; throw new Error("fetch should not run"); },
     liveDirectory: createLocationDirectory(example),
     ledgerPath: path.join(os.tmpdir(), `centik-spend-${Date.now()}.json`)
@@ -263,8 +269,10 @@ test("a spend token is rejected when it is signed badly, expired, or for another
         ...TEST_AUTH,
         DATAFORSEO_LIVE: "true",
         DATAFORSEO_LOGIN: "login-user",
-        DATAFORSEO_PASSWORD: "test-password-value"
+        DATAFORSEO_PASSWORD: "test-password-value",
+        DATAFORSEO_SPENT_BASELINE_USD: "0"
       },
+      readAccountSpent: async () => 0,
       now: () => NOW + 6 * 60 * 1000,
       fetchImpl: async () => { fetches += 1; throw new Error("fetch should not run"); },
       liveDirectory: createLocationDirectory(example)
@@ -276,6 +284,56 @@ test("a spend token is rejected when it is signed badly, expired, or for another
     });
     assert.equal(fetches, 0);
   });
+});
+
+test("the account baseline caps live spend and fails closed", async () => {
+  const prepared = {
+    niche: "emergency plumber",
+    city: "Austin",
+    state: "Texas",
+    countryCanonical: "United States",
+    confirmed: { google_ads: { location_code: 1 }, google_maps: { location_code: 2 } }
+  };
+  const missing = createSpendGate({ capUsd: 10, tokenSecret: "secret", baselineUsd: null, now: () => NOW });
+  await assert.rejects(() => missing.quote("team@centik.ai", prepared, { requireAccount: true }), /BASELINE/);
+  let reads = 0;
+  const broken = createSpendGate({
+    capUsd: 10,
+    tokenSecret: "secret",
+    baselineUsd: 4,
+    now: () => NOW,
+    readAccountSpent: async () => { reads += 1; throw new Error("down"); }
+  });
+  await assert.rejects(() => broken.quote("team@centik.ai", prepared, { requireAccount: true }), /could not be read/);
+  assert.equal(reads, 1);
+  const tight = createSpendGate({
+    capUsd: 10,
+    tokenSecret: "secret",
+    baselineUsd: 100,
+    now: () => NOW,
+    readAccountSpent: async () => 109.95
+  });
+  await assert.rejects(() => tight.quote("team@centik.ai", prepared, { requireAccount: true }), /spend cap/);
+  const open = createSpendGate({
+    capUsd: 10,
+    tokenSecret: "secret",
+    baselineUsd: 100,
+    now: () => NOW,
+    readAccountSpent: async () => 100.5
+  });
+  const quoted = await open.quote("team@centik.ai", prepared, { requireAccount: true });
+  assert.equal(quoted.spent_usd, 0.5);
+  assert.equal(quoted.remaining_usd, 9.5);
+  assert.equal(quoted.account_total_spent_usd, 100.5);
+  const accepted = await open.accept(quoted.spend_token, "team@centik.ai", prepared, { requireAccount: true });
+  assert.equal(accepted.ok, true);
+});
+
+test("Austin's map uses nearby Texas cities, not the national list", () => {
+  const names = nearbyPlaces("austin-tx").map((place) => place.name);
+  assert.deepEqual(names, ["Austin", "Cedar Park", "Round Rock", "Georgetown", "San Marcos"]);
+  assert.equal(names.includes("Houston"), false);
+  assert.equal(names.includes("New York"), false);
 });
 
 test("the ledger stores the provider cost and reloads from disk", async () => {

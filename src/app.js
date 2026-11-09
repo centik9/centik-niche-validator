@@ -8,12 +8,13 @@ import {
   MAX_BODY_BYTES,
   REQUEST_TIMEOUT_MS,
   SERVICE_NAME,
+  USER_DATA_PATH,
   VERSION
 } from "./config.js";
 import { accessGranted, clearSessionCookie, readSession, sessionCookie, sessionTokenFromRequest, signSession } from "./auth.js";
 import { createLiveTransport } from "./dataforseo.js";
 import { HttpError } from "./errors.js";
-import { createSpendGate } from "./spend.js";
+import { accountSpentUsd, createSpendGate } from "./spend.js";
 import { createExampleTransport } from "./example-transport.js";
 import { parseResolveInput, parseValidateInput } from "./input.js";
 import { createLocationDirectory } from "./locations.js";
@@ -38,8 +39,18 @@ function spendRefusal(reason) {
   if (reason === "mismatched") return "That spend confirmation does not match this niche and market. No DataForSEO request was sent.";
   if (reason === "bad_signature") return "That spend confirmation is not valid. No DataForSEO request was sent.";
   if (reason === "spend_cap_exceeded") return "This check would pass the spend cap. No DataForSEO request was sent.";
+  if (reason === "spend_baseline_missing") return "DATAFORSEO_SPENT_BASELINE_USD is not set. Live checks are refused. No paid request was sent.";
+  if (reason === "spend_account_unavailable") return "The DataForSEO account spend could not be read. Live checks are refused. No paid request was sent.";
   return "A paid check needs a fresh confirmation. No DataForSEO request was sent.";
 }
+
+function baselineUsd(env) {
+  if (env.DATAFORSEO_SPENT_BASELINE_USD == null || String(env.DATAFORSEO_SPENT_BASELINE_USD).trim() === "") return null;
+  const parsed = Number(env.DATAFORSEO_SPENT_BASELINE_USD);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+
+const SPEND_BLOCKS = new Set(["spend_cap_exceeded", "spend_baseline_missing", "spend_account_unavailable"]);
 
 function numberEnv(value, fallback) {
   const parsed = Number(value);
@@ -117,6 +128,17 @@ export function createApp(options = {}) {
     capUsd: numberEnv(env.SPEND_CAP_USD, 10),
     ledgerPath: options.ledgerPath || env.SPEND_LEDGER_PATH || path.join(process.cwd(), "data", "spend-ledger.json"),
     tokenSecret: env.SPEND_TOKEN_SECRET || "",
+    baselineUsd: options.baselineUsd !== undefined ? options.baselineUsd : baselineUsd(env),
+    readAccountSpent: options.readAccountSpent || (async () => {
+      const payload = await liveBundle().transport.request({ method: "GET", path: USER_DATA_PATH });
+      const spent = accountSpentUsd(payload);
+      if (spent == null) {
+        const error = new Error("missing total_spent");
+        error.code = "spend_account_unavailable";
+        throw error;
+      }
+      return spent;
+    }),
     now
   });
   const loginLimiter = createRateLimiter({ windowMs: 15 * 60_000, max: 8, clock: now });
@@ -328,7 +350,7 @@ export function createApp(options = {}) {
       }
       const prepared = parseValidateInput(json);
       try {
-        const quoted = await spend.quote(session.email, prepared);
+        const quoted = await spend.quote(session.email, prepared, { requireAccount: liveEnabled(env) });
         send(res, 200, { ...quoted, live_mode: liveEnabled(env), credentials_configured: credentialsReady(env) });
       } catch (error) {
         if (error && error.status) {
@@ -379,12 +401,11 @@ export function createApp(options = {}) {
     }
     const prepared = pathname === "/api/resolve" ? parseResolveInput(json) : parseValidateInput(json);
     if (pathname === "/api/validate" && prepared.mode === "live") {
-      const decision = spend.accept(json.spend_token, session.email, prepared);
+      const decision = await spend.accept(json.spend_token, session.email, prepared, { requireAccount: liveEnabled(env) });
       if (!decision.ok) {
-        const capped = decision.reason === "spend_cap_exceeded";
         send(res, 403, {
-          error: capped ? "spend_cap_exceeded" : "spend_not_confirmed",
-          message: spendRefusal(decision.reason)
+          error: SPEND_BLOCKS.has(decision.reason) ? decision.reason : "spend_not_confirmed",
+          message: decision.message || spendRefusal(decision.reason)
         });
         return;
       }

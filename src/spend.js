@@ -19,6 +19,14 @@ function dollars(units) {
   return Math.round(units) / SCALE;
 }
 
+export function accountSpentUsd(payload) {
+  const task = payload && Array.isArray(payload.tasks) ? payload.tasks[0] : null;
+  const result = task && task.result;
+  const row = Array.isArray(result) ? result[0] : result;
+  const spent = row && row.money && row.money.total_spent;
+  return typeof spent === "number" && Number.isFinite(spent) ? spent : null;
+}
+
 export function paidCalls() {
   return [
     {
@@ -65,6 +73,12 @@ export function createSpendGate(options = {}) {
   const capUnits = milli(options.capUsd ?? 10);
   const ledgerPath = options.ledgerPath || "";
   const tokenSecret = options.tokenSecret || "";
+  const baselineUsd = Number.isFinite(options.baselineUsd) ? options.baselineUsd : null;
+  const readAccountSpent = options.readAccountSpent || (async () => {
+    const error = new Error("The DataForSEO account spend could not be read. Live checks are refused. No paid request was sent.");
+    error.code = "spend_account_unavailable";
+    throw error;
+  });
   const entries = [];
   const results = new Map();
   const used = new Set();
@@ -113,8 +127,42 @@ export function createSpendGate(options = {}) {
     };
   }
 
-  function roomFor(costUsd) {
-    return spentUnits() + milli(costUsd) <= capUnits;
+  async function accountPosition(costUsd) {
+    if (baselineUsd == null) {
+      const error = new Error("DATAFORSEO_SPENT_BASELINE_USD is not set. Live checks are refused. No paid request was sent.");
+      error.code = "spend_baseline_missing";
+      error.status = 403;
+      throw error;
+    }
+    let current;
+    try {
+      current = await readAccountSpent();
+    } catch {
+      const error = new Error("The DataForSEO account spend could not be read. Live checks are refused. No paid request was sent.");
+      error.code = "spend_account_unavailable";
+      error.status = 403;
+      throw error;
+    }
+    const parsed = typeof current === "number" ? current : accountSpentUsd(current);
+    if (parsed == null || parsed + 0.000001 < baselineUsd) {
+      const error = new Error("DataForSEO money.total_spent is missing or below the go-live baseline. Live checks are refused. No paid request was sent.");
+      error.code = "spend_account_unavailable";
+      error.status = 403;
+      throw error;
+    }
+    const usedUnits = milli(parsed - baselineUsd);
+    if (usedUnits + milli(costUsd) > capUnits) {
+      const error = new Error("This check would pass the spend cap. No DataForSEO request was sent.");
+      error.code = "spend_cap_exceeded";
+      error.status = 403;
+      throw error;
+    }
+    return {
+      account_total_spent_usd: parsed,
+      baseline_usd: baselineUsd,
+      spent_usd: dollars(usedUnits),
+      remaining_usd: dollars(capUnits - usedUnits)
+    };
   }
 
   function signToken(bind) {
@@ -144,7 +192,7 @@ export function createSpendGate(options = {}) {
     return { ok: true, body };
   }
 
-  async function quote(email, prepared) {
+  async function quote(email, prepared, flags = {}) {
     await load();
     if (!tokenSecret) {
       const error = new Error("SPEND_TOKEN_SECRET must be set before a paid check can be confirmed.");
@@ -155,21 +203,19 @@ export function createSpendGate(options = {}) {
     const bind = bindSpendRequest(email, prepared);
     const hit = freshResult(bind);
     const cost = hit ? 0 : QUERY_COST_USD;
-    if (!roomFor(cost)) {
-      const error = new Error("This check would pass the spend cap. No DataForSEO request was sent.");
-      error.code = "spend_cap_exceeded";
-      error.status = 403;
-      throw error;
-    }
+    const account = flags.requireAccount ? await accountPosition(cost) : null;
     const signed = signToken(bind);
     const state = totals();
     return {
       calls: hit ? [] : paidCalls(),
       cache_hit: Boolean(hit),
       estimated_cost_usd: cost,
-      spent_usd: state.spent_usd,
-      remaining_usd: state.remaining_usd,
+      spent_usd: account ? account.spent_usd : state.spent_usd,
+      remaining_usd: account ? account.remaining_usd : state.remaining_usd,
       cap_usd: state.cap_usd,
+      baseline_usd: account ? account.baseline_usd : baselineUsd,
+      account_total_spent_usd: account ? account.account_total_spent_usd : null,
+      account_checked: Boolean(account),
       spend_token: signed.token,
       expires_at: new Date(signed.exp).toISOString(),
       niche: prepared.niche,
@@ -177,16 +223,28 @@ export function createSpendGate(options = {}) {
     };
   }
 
-  function accept(token, email, prepared) {
+  function inspect(token, email, prepared) {
     const parsed = readToken(token);
     if (!parsed.ok) return parsed;
     const bind = bindSpendRequest(email, prepared);
     if (!sameBind(parsed.body.bind, bind)) return { ok: false, reason: "mismatched" };
     const hit = freshResult(bind);
-    const cost = hit ? 0 : QUERY_COST_USD;
-    if (!roomFor(cost)) return { ok: false, reason: "spend_cap_exceeded", status: 403 };
-    used.add(parsed.body.nonce);
-    return { ok: true, bind, cache_hit: Boolean(hit), estimated_cost_usd: cost };
+    return { ok: true, bind, nonce: parsed.body.nonce, cache_hit: Boolean(hit), estimated_cost_usd: hit ? 0 : QUERY_COST_USD };
+  }
+
+  async function accept(token, email, prepared, flags = {}) {
+    const parsed = inspect(token, email, prepared);
+    if (!parsed.ok) return parsed;
+    if (flags.requireAccount) {
+      try {
+        await accountPosition(parsed.estimated_cost_usd);
+      } catch (error) {
+        return { ok: false, reason: error.code || "spend_account_unavailable", message: error.message };
+      }
+    }
+    if (used.has(parsed.nonce)) return { ok: false, reason: "reused" };
+    used.add(parsed.nonce);
+    return parsed;
   }
 
   function freshResult(bind) {
@@ -232,5 +290,5 @@ export function createSpendGate(options = {}) {
     return cost;
   }
 
-  return { load, ready: load(), totals, quote, accept, freshResult, remember, record, roomFor };
+  return { load, ready: load(), totals, quote, inspect, accept, freshResult, remember, record, accountPosition };
 }

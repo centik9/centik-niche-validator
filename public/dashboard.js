@@ -96,9 +96,16 @@ function renderRows() {
           row.label,
           estimated ? el("span", { class: "est-tag" }, ["EST."]) : ""
         ]),
-        el("div", { class: `bar${estimated ? " dashed" : ""}`, style: zone ? `color:var(${zone.c})` : "" }, [
-          el("span", { "data-w": score == null ? "0" : String(score), style: `width:${score || 0}%;background:${zone ? `var(${zone.c})` : "var(--muted)"}` })
-        ]),
+        (() => {
+          const track = el("div", { class: `bar${estimated ? " dashed" : ""}` });
+          const span = el("span");
+          span.style.width = `${score || 0}%`;
+          span.style.background = estimated
+            ? "repeating-linear-gradient(90deg,#fbbf24 0 7px,transparent 7px 11px)"
+            : zoneColor(zone);
+          track.append(span);
+          return track;
+        })(),
         estimated ? el("span", { class: "note" }, [row.price && row.price.pending_review ? "Pending review. This cannot turn the row green." : "Estimate. Capped below a green row."]) : ""
       ]),
       el("div", {}, [
@@ -111,15 +118,35 @@ function renderRows() {
   });
 }
 
-function renderMap(cards) {
-  const cities = cards.filter((card) => card.geography_type === "city").slice(0, 5);
+const ZONE_HEX = { No: "#f87171", Low: "#fb923c", Medium: "#fbbf24", High: "#a3e635", Max: "#34d399" };
+
+function zoneColor(zone) {
+  return zone ? ZONE_HEX[zone.name] : "#94a3b8";
+}
+
+function cityPool() {
+  return [...state.cards, ...(state.nearbyCards || [])];
+}
+
+function shownCities() {
+  const cities = cityPool().filter((card) => card.geography_type === "city");
+  if (!state.location) return state.cards.filter((card) => card.geography_type === "city").slice(0, 5);
+  const ids = state.location.nearby_ids && state.location.nearby_ids.length ? state.location.nearby_ids : [state.location.id];
+  return ids
+    .map((id) => cities.find((card) => card.id === id))
+    .filter(Boolean)
+    .sort((a, b) => b.example_relative_demand - a.example_relative_demand);
+}
+
+function renderMap() {
+  const cities = shownCities();
   const wrap = $("mapwrap");
   wrap.replaceChildren();
   const map = svg("svg", { viewBox: "0 0 360 210", class: "map", role: "img", "aria-label": "Stylized map of the example cities. Not a real map." });
   svg("path", { d: "M40 60 C 90 40, 150 45, 210 52 S 310 70, 330 110 S 300 180, 230 186 S 90 190, 50 160 S 10 90, 40 60 Z", fill: "rgba(167,139,250,.05)", stroke: "#a78bfa", "stroke-opacity": ".45", "stroke-dasharray": "4 5" }, map);
   const spots = [[70, 92], [150, 104], [214, 96], [226, 150], [158, 156]];
   cities.forEach((card, index) => {
-    const [x, y] = spots[index];
+    const [x, y] = spots[index] || [40 + (index % 5) * 60, 40 + Math.floor(index / 5) * 70];
     const selected = state.location && state.location.id === card.id;
     const group = svg("g", { transform: `translate(${x} ${y})` }, map);
     svg("circle", { r: selected ? 6 : 4.5, fill: selected ? "#f4f8fc" : "#22d3ee" }, group);
@@ -198,12 +225,13 @@ function renderGauge(composite, title, note) {
   });
   $("num").style.opacity = "1";
   $("num").textContent = display;
+  $("chipwrap").replaceChildren(zone ? el("span", { class: "chip", style: `color:${zoneColor(zone)}` }, [zone.name]) : "");
   $("verdict").textContent = zone ? zone.line : "The score appears after you pick a city.";
   $("demand-note").textContent = note || "";
   const factors = composite && composite.demand ? [
     ["Demand", composite.demand.index, "40%", "--cyan", composite.demand.contribution_display],
     ["Competition", composite.competition.index, "30%", "--violet", composite.competition.contribution_display],
-    ["Margin", composite.margin.index, "30%", "--green", composite.margin.contribution_display]
+    ["Margin", composite.margin.index, "30%", "--pink", composite.margin.contribution_display]
   ] : [];
   const board = $("bd");
   board.replaceChildren();
@@ -214,7 +242,14 @@ function renderGauge(composite, title, note) {
         el("span", { class: "w" }, [`× ${weight}`]),
         el("span", { class: "p num" }, [points == null ? "—" : `${points} pts`])
       ]),
-      el("span", { class: "track" }, [el("span", { style: `width:${value == null ? 0 : value}%;background:var(${color})` })])
+      (() => {
+          const track = el("span", { class: "track" });
+          const span = el("span");
+          span.style.width = `${value == null ? 0 : value}%`;
+          span.style.background = `var(${color})`;
+          track.append(span);
+          return track;
+        })()
     ]));
   });
   if (composite && composite.composite_display) {
@@ -344,14 +379,16 @@ async function chooseSubniche(row) {
   renderRows();
   const shortlist = await post("/api/microsite", { action: "shortlist", keyword: state.keyword, subniche_id: row.id });
   state.cards = shortlist.cards || [];
-  renderMap(state.cards);
+  state.nearbyCards = shortlist.nearby_cards || [];
+  state.location = null;
+  renderMap();
   paintStepper();
 }
 
 async function chooseLocation(card) {
   if (card.geography_type !== "city") return;
   state.location = card;
-  renderMap(state.cards);
+  renderMap();
   state.proposal = await post("/api/microsite", {
     action: "proposal",
     keyword: state.keyword,
@@ -490,7 +527,7 @@ $("pay-cancel").addEventListener("click", () => {
   state.proposal = null;
   renderQuote(null, null);
   renderSketch(null);
-  renderMap(state.cards);
+  renderMap();
   $("paid-note").textContent = "Canceled. Nothing was sent.";
   paintStepper();
 });

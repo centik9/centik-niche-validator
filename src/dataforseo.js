@@ -6,7 +6,8 @@ import {
   MAPS_PATH,
   MAX_UPSTREAM_BYTES,
   SEARCH_VOLUME_PATH,
-  UPSTREAM_TIMEOUT_MS
+  UPSTREAM_TIMEOUT_MS,
+  USER_DATA_PATH
 } from "./config.js";
 import { DataForSeoError } from "./errors.js";
 
@@ -26,8 +27,8 @@ function assertKeyword(keyword, label) {
 }
 
 export function assertSafeRequest({ method, path, body }) {
-  if (method === "GET" && LOCATION_GET.test(path)) {
-    if (body !== undefined && body !== null) refused("Location list requests do not take a body.");
+  if (method === "GET" && (LOCATION_GET.test(path) || path === USER_DATA_PATH)) {
+    if (body !== undefined && body !== null) refused("This GET does not take a body.");
     return;
   }
   if (method === "POST" && path === SEARCH_VOLUME_PATH) {

@@ -38,7 +38,9 @@ test("refuses billable shapes that would widen or enlarge the query", () => {
   assert.throws(() => assertSafeRequest({ method: "POST", path: SEARCH_VOLUME_PATH, body: volumeBody({ location_coordinate: "30,-97" }) }), /coordinates/);
   assert.throws(() => assertSafeRequest({ method: "POST", path: SEARCH_VOLUME_PATH, body: [{ keywords: ["a", "b"], location_code: 1, language_code: "en", search_partners: false }] }), /one keyword/);
   assert.throws(() => assertSafeRequest({ method: "POST", path: "/v3/serp/google/organic/live/advanced", body: [] }), /not used/);
-  assert.throws(() => assertSafeRequest({ method: "GET", path: "/v3/appendix/user_data", body: undefined }), /not used/);
+  assert.doesNotThrow(() => assertSafeRequest({ method: "GET", path: "/v3/appendix/user_data" }));
+  assert.throws(() => assertSafeRequest({ method: "GET", path: "/v3/appendix/user_data", body: [{ money: 1 }] }), /body/);
+  assert.throws(() => assertSafeRequest({ method: "GET", path: "/v3/appendix/status" }), /not used/);
 });
 
 test("live transport times out once and does not retry or echo credentials", async () => {
