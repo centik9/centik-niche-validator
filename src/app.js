@@ -235,6 +235,21 @@ export function createApp(options = {}) {
       send(res, 200, { ok: true }, { "Set-Cookie": clearSessionCookie() });
       return;
     }
+    if (req.method === "GET" && pathname.startsWith("/fonts/")) {
+      const fontName = pathname.slice("/fonts/".length);
+      if (!/^[a-z0-9.-]+\.woff2$/.test(fontName)) {
+        send(res, 404, { error: "not_found", message: "Not found." });
+        return;
+      }
+      const data = await fs.readFile(path.join(PUBLIC_DIR, "fonts", fontName));
+      res.writeHead(200, {
+        "Content-Type": "font/woff2",
+        "Cache-Control": "public, max-age=86400",
+        "X-Content-Type-Options": "nosniff"
+      });
+      res.end(data);
+      return;
+    }
     if (req.method === "GET" && (pathname === "/login.js" || pathname === "/styles.css" || pathname === "/dashboard.js")) {
       const name = pathname.slice(1);
       const data = await fs.readFile(path.join(PUBLIC_DIR, name));

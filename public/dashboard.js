@@ -49,7 +49,6 @@ const state = {
 };
 
 let suggestTimer = 0;
-let revealed = false;
 
 async function post(pathname, body) {
   const response = await fetch(pathname, {
@@ -93,10 +92,14 @@ function renderRows() {
     item.append(
       el("span", { class: "rk" }, [String(index + 1)]),
       el("div", {}, [
-        el("div", { class: "nm" }, [row.label, estimated ? el("span", { class: "est-tag", title: row.price && row.price.pending_review ? "Pending review" : "Price is estimated" }, ["EST."]) : ""]),
+        el("div", { class: "nm" }, [
+          row.label,
+          estimated ? el("span", { class: "est-tag" }, ["EST."]) : ""
+        ]),
         el("div", { class: `bar${estimated ? " dashed" : ""}`, style: zone ? `color:var(${zone.c})` : "" }, [
-          el("span", { "data-w": score == null ? "0" : String(score), style: `width:${score || 0}%;background:${zone ? `var(${zone.c})` : "var(--text3)"}` })
-        ])
+          el("span", { "data-w": score == null ? "0" : String(score), style: `width:${score || 0}%;background:${zone ? `var(${zone.c})` : "var(--muted)"}` })
+        ]),
+        estimated ? el("span", { class: "note" }, [row.price && row.price.pending_review ? "Pending review. This cannot turn the row green." : "Estimate. Capped below a green row."]) : ""
       ]),
       el("div", {}, [
         el("span", { class: "sc num" }, [score == null ? "—" : String(Math.round(score))]),
@@ -120,7 +123,17 @@ function renderMap(cards) {
     const selected = state.location && state.location.id === card.id;
     const group = svg("g", { transform: `translate(${x} ${y})` }, map);
     svg("circle", { r: selected ? 6 : 4.5, fill: selected ? "#f4f8fc" : "#22d3ee" }, group);
-    const label = svg("text", { x: 10, y: -8, "font-size": selected ? 14 : 12.5, "font-weight": selected ? 800 : 600, fill: selected ? "#eef2f7" : "#a9b4c6", stroke: "#0a0e15", "stroke-width": 3.5, "paint-order": "stroke" }, group);
+    const label = svg("text", {
+      x: index % 2 === 0 ? 12 : -12,
+      y: index % 2 === 0 ? -12 : 18,
+      "text-anchor": index % 2 === 0 ? "start" : "end",
+      "font-size": selected ? 14 : 12.5,
+      "font-weight": selected ? 700 : 600,
+      fill: selected ? "#f1f5f9" : "#cbd5e1",
+      stroke: "#07090d",
+      "stroke-width": 3.5,
+      "paint-order": "stroke"
+    }, group);
     label.textContent = card.name;
   });
   wrap.append(map);
@@ -137,61 +150,82 @@ function renderMap(cards) {
   });
 }
 
-function renderGauge(composite, title) {
+function renderGauge(composite, title, note) {
   $("score-title").textContent = title;
   const score = composite && composite.status === "calculated" ? Number(composite.composite_display) : null;
   const zone = score == null ? null : zoneOf(score);
-  const wrap = $("dialwrap");
-  wrap.replaceChildren();
-  const G = { cx: 200, cy: 214, R: 158, SW: 20 };
+  const display = score == null ? "—" : (composite.composite_display || String(Math.round(score)));
+  const G = { cx: 180, cy: 168, R: 112 };
   const point = (value, radius) => {
     const angle = Math.PI * (1 - value / 100);
     return [G.cx + radius * Math.cos(angle), G.cy - radius * Math.sin(angle)];
   };
-  const arc = (start, end, radius) => {
+  const arcPath = (start, end, radius) => {
     const [x1, y1] = point(start, radius);
     const [x2, y2] = point(end, radius);
-    return `M${x1.toFixed(2)} ${y1.toFixed(2)} A${radius} ${radius} 0 0 1 ${x2.toFixed(2)} ${y2.toFixed(2)}`;
+    return `M ${x1.toFixed(2)} ${y1.toFixed(2)} A ${radius} ${radius} 0 0 1 ${x2.toFixed(2)} ${y2.toFixed(2)}`;
   };
-  const dial = svg("svg", { viewBox: "0 0 400 240", class: "dial", role: "img", "aria-label": score == null ? "No market score yet." : `Market score ${composite.composite_display} out of 100. Zone ${zone.name}.` });
-  svg("path", { d: arc(0, 100, G.R), fill: "none", stroke: "#1c2432", "stroke-width": G.SW }, dial);
-  ZONES.forEach((item) => {
-    svg("path", { d: arc(item.from + (item.from ? 0.7 : 0), item.to - (item.to < 100 ? 0.7 : 0), G.R), fill: "none", stroke: `var(${item.c})`, "stroke-width": G.SW, opacity: zone && item.name === zone.name ? "1" : "0.65" }, dial);
+  const dial = svg("svg", {
+    viewBox: "0 0 360 210",
+    class: "dial",
+    role: "img",
+    "aria-label": score == null ? "No market score yet." : `Market score ${display} out of 100. Zone ${zone.name}.`
   });
-  const needle = svg("g", {}, dial);
-  const angle = score == null ? -90 : (score - 50) * 1.8;
-  needle.setAttribute("transform", `rotate(${angle} ${G.cx} ${G.cy})`);
-  svg("path", { d: `M${G.cx - 3} ${G.cy} L${G.cx} ${G.cy - 132} L${G.cx + 3} ${G.cy} Z`, fill: "#f4f8fc" }, needle);
-  svg("circle", { cx: G.cx, cy: G.cy, r: 13, fill: "#0b1018", stroke: "#22d3ee", "stroke-width": 2 }, dial);
-  svg("circle", { cx: G.cx, cy: G.cy, r: 4, fill: "#f4f8fc" }, dial);
-  wrap.append(dial);
-  $("num").textContent = score == null ? "—" : (composite.composite_display || String(Math.round(score)));
-  $("chipwrap").replaceChildren(zone ? el("span", { class: "chip", style: `color:var(${zone.c})` }, [el("span", { class: "w" }, [zone.name])]) : "");
+  const defs = svg("defs", {}, dial);
+  const filter = svg("filter", { id: "zoneglow", x: "-30%", y: "-30%", width: "160%", height: "160%" }, defs);
+  svg("feGaussianBlur", { stdDeviation: "2.4", result: "blur" }, filter);
+  svg("feMerge", {}, filter).append(svg("feMergeNode", { in: "blur" }), svg("feMergeNode", { in: "SourceGraphic" }));
+  svg("path", { d: arcPath(0, 100, G.R), fill: "none", stroke: "#0c111a", "stroke-width": 16 }, dial);
+  const glow = svg("g", { filter: "url(#zoneglow)", opacity: "0.7" }, dial);
+  ZONES.forEach((item) => {
+    const d = arcPath(item.from + (item.from ? 0.7 : 0.4), item.to - (item.to < 100 ? 0.7 : 0.4), G.R);
+    svg("path", { d, fill: "none", stroke: `var(${item.c})`, "stroke-width": 16 }, glow);
+    svg("path", { d, fill: "none", stroke: `var(${item.c})`, "stroke-width": 16 }, dial);
+  });
+  [0, 25, 50, 75, 100].forEach((mark) => {
+    const [x, y] = point(mark, 146);
+    const label = svg("text", { x: x.toFixed(1), y: (y + 4).toFixed(1), "text-anchor": "middle", fill: "#cbd5e1", "font-size": 12, "font-family": "IBM Plex Mono, monospace" }, dial);
+    label.textContent = String(mark);
+  });
+  const needle = svg("g", { id: "needle" }, dial);
+  needle.setAttribute("transform", `rotate(-90 ${G.cx} ${G.cy})`);
+  svg("path", { d: `M${G.cx - 3} ${G.cy} L${G.cx} ${G.cy - 96} L${G.cx + 3} ${G.cy} Z`, fill: "#f8fafc" }, needle);
+  svg("circle", { cx: G.cx, cy: G.cy, r: 11, fill: "#041016", stroke: "#22d3ee", "stroke-width": 3 }, dial);
+  svg("circle", { cx: G.cx, cy: G.cy, r: 4, fill: "#22d3ee" }, dial);
+  $("dialwrap").replaceChildren(dial);
+  document.querySelectorAll("#zone-legend li").forEach((item) => {
+    item.classList.toggle("on", zone && item.dataset.zone === zone.name);
+  });
+  $("num").style.opacity = "1";
+  $("num").textContent = display;
   $("verdict").textContent = zone ? zone.line : "The score appears after you pick a city.";
+  $("demand-note").textContent = note || "";
   const factors = composite && composite.demand ? [
-    ["Demand", composite.demand.index, 40, "--cyan", composite.demand.contribution_display],
-    ["Competition", composite.competition.index, 30, "--violet", composite.competition.contribution_display],
-    ["Margin", composite.margin.index, 30, "--pink", composite.margin.contribution_display]
+    ["Demand", composite.demand.index, "40%", "--cyan", composite.demand.contribution_display],
+    ["Competition", composite.competition.index, "30%", "--violet", composite.competition.contribution_display],
+    ["Margin", composite.margin.index, "30%", "--green", composite.margin.contribution_display]
   ] : [];
   const board = $("bd");
   board.replaceChildren();
   factors.forEach(([name, value, weight, color, points]) => {
     board.append(el("div", { class: "bd-row" }, [
-      el("span", { class: "n" }, [name]),
-      el("span", { class: "track", style: `color:var(${color})` }, [el("span", { style: `width:${value == null ? 0 : value}%;background:var(${color})` })]),
-      el("span", { class: "w num" }, [value == null ? "—" : `${value} × ${weight}%`]),
-      el("span", { class: "p num" }, [points == null ? "—" : `${points} pts`])
+      el("div", { class: "bd-top" }, [
+        el("span", { class: "n" }, [name]),
+        el("span", { class: "w" }, [`× ${weight}`]),
+        el("span", { class: "p num" }, [points == null ? "—" : `${points} pts`])
+      ]),
+      el("span", { class: "track" }, [el("span", { style: `width:${value == null ? 0 : value}%;background:var(${color})` })])
     ]));
   });
   if (composite && composite.composite_display) {
     board.append(el("div", { class: "bd-row tot" }, [
-      el("span", { class: "n" }, ["Total"]),
-      el("span", {}, []),
-      el("span", { class: "w" }, []),
-      el("span", { class: "p num" }, [composite.composite_display])
+      el("div", { class: "bd-top" }, [
+        el("span", { class: "n" }, ["Total"]),
+        el("span", { class: "p num" }, [composite.composite_display])
+      ])
     ]));
   }
-  if (!revealed && score != null) playReveal(score);
+  if (score != null) playReveal(score, display);
 }
 
 function renderEstimates(proposal) {
@@ -324,7 +358,11 @@ async function chooseLocation(card) {
     subniche_id: state.subniche.id,
     location_id: card.id
   });
-  renderGauge(state.proposal.composite, `${state.proposal.subniche.label} in ${card.name}, ${card.state}`);
+  renderGauge(
+    state.proposal.composite,
+    `${state.proposal.subniche.label} in ${card.name}, ${card.state}`,
+    state.proposal.deep_check_gate && state.proposal.deep_check_gate.demand_basis_note
+  );
   renderEstimates(state.proposal);
   renderSketch(state.proposal);
   $("score-pill").textContent = "Sample data";
@@ -391,36 +429,39 @@ async function runPaid() {
   }
 }
 
-function playReveal(score) {
-  revealed = true;
+function easeOutQuad(progress) {
+  return 1 - (1 - progress) ** 2;
+}
+
+function playReveal(score, display) {
+  const needle = document.getElementById("needle");
+  const number = $("num");
+  number.style.opacity = "1";
+  const target = -90 + score * 1.8;
+  const hub = "180 168";
   const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const grid = $("grid");
-  if (reduce) {
-    grid.style.opacity = "0";
-    requestAnimationFrame(() => {
-      grid.style.transition = "opacity 200ms linear";
-      grid.style.opacity = "1";
-    });
-    $("live").textContent = `Market score ${Math.round(score)} out of 100, zone ${zoneOf(score).name}.`;
+  if (!needle || reduce) {
+    if (needle) needle.setAttribute("transform", `rotate(${target} ${hub})`);
+    number.textContent = display;
+    $("live").textContent = `Market score ${display} out of 100, zone ${zoneOf(score).name}.`;
     return;
   }
-  const cards = [...document.querySelectorAll(".card")];
+  const overshoot = target + 3.5;
   const started = performance.now();
   const tick = (now) => {
-    const t = now - started;
-    cards.forEach((card, index) => {
-      const p = Math.min(1, Math.max(0, (t - index * 70) / 460));
-      const eased = 1 - Math.pow(1 - p, 3);
-      card.style.opacity = String(eased);
-      card.style.transform = `translateY(${(1 - eased) * 18}px)`;
-    });
-    const sweep = Math.min(1, Math.max(0, (t - 600) / 1150));
-    const shown = Math.min(score, score * (1 + 1.25 * Math.pow(sweep - 1, 3) + 1.25 * Math.pow(sweep - 1, 2) + 1));
-    $("num").textContent = String(Math.round(Math.max(0, Math.min(score, shown))));
-    if (t < 2700) requestAnimationFrame(tick);
+    const t = (now - started) / 1000;
+    let angle = target;
+    if (t < 0.75) angle = -90 + (overshoot + 90) * easeOutQuad(t / 0.75);
+    else if (t < 1.05) angle = overshoot + (target - overshoot) * easeOutQuad((t - 0.75) / 0.3);
+    needle.setAttribute("transform", `rotate(${angle} ${hub})`);
+    const counted = score * easeOutQuad(Math.min(1, t / 1));
+    number.textContent = t >= 1 ? display : counted.toFixed(1);
+    number.style.opacity = "1";
+    if (t < 1.05) requestAnimationFrame(tick);
     else {
-      $("num").textContent = Number.isInteger(score) ? String(score) : score.toFixed(1);
-      $("live").textContent = `Market score ${Math.round(score)} out of 100, zone ${zoneOf(score).name}.`;
+      needle.setAttribute("transform", `rotate(${target} ${hub})`);
+      number.textContent = display;
+      $("live").textContent = `Market score ${display} out of 100, zone ${zoneOf(score).name}.`;
     }
   };
   requestAnimationFrame(tick);
@@ -455,12 +496,11 @@ $("pay-cancel").addEventListener("click", () => {
 });
 
 fetch("/health").then((response) => response.json()).then((health) => {
-  const live = health.live_mode ? "on" : "off";
-  $("server-status").querySelector("span").textContent = health.credentials_configured
-    ? `Live mode ${live}`
-    : `Sample mode, live checks ${live}`;
+  const on = Boolean(health.live_mode);
+  $("server-status").classList.toggle("on", on);
+  $("server-status").querySelector("span").textContent = on ? "LIVE MODE ON" : "LIVE MODE OFF";
 }).catch(() => {
-  $("server-status").querySelector("span").textContent = "Health check failed";
+  $("server-status").querySelector("span").textContent = "LIVE MODE OFF";
 });
 
 paintStepper();
