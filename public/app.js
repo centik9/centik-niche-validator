@@ -309,6 +309,58 @@ function renderReport() {
     root.append(el("p", {}, [`Monthly arithmetic mean ${report.demand.monthly_crosscheck.arithmetic_mean} differs from search_volume. The index still uses search_volume.`]));
   }
   if (report.demand.error && report.demand.error.message) root.append(el("p", { class: "error" }, [report.demand.error.message]));
+  if (report.demand.clustered_coverage_volume) {
+    root.append(metric("Clustered coverage volume (demand index input)", report.demand.clustered_coverage_volume));
+    root.append(el("p", { class: "muted" }, [report.demand.clustered_coverage_volume.note || "The demand index uses clustered coverage volume. The core term above is separate."]));
+  }
+  if (report.demand.keyword_rows && report.demand.keyword_rows.length) {
+    const phraseTable = el("table", {}, [
+      el("thead", {}, [el("tr", {}, ["Phrase", "Monthly volume", "CPC", "Competition"].map((heading) => el("th", {}, [heading])))])
+    ]);
+    const phraseBody = el("tbody");
+    report.demand.keyword_rows.forEach((row) => {
+      const volumeText = row.search_volume && row.search_volume.value != null ? String(row.search_volume.value) : "Missing";
+      const cpcText = row.cpc && row.cpc.value != null ? String(row.cpc.value) : "Missing";
+      const competitionText = row.paid_search_competition && row.paid_search_competition.value != null ? String(row.paid_search_competition.value) : "Missing";
+      phraseBody.append(el("tr", {}, [
+        el("td", {}, [row.keyword || "—"]),
+        el("td", {}, [volumeText]),
+        el("td", {}, [cpcText]),
+        el("td", {}, [competitionText])
+      ]));
+    });
+    phraseTable.append(phraseBody);
+    root.append(el("h3", {}, ["Packed search phrases"]));
+    root.append(el("div", { class: "scroll" }, [phraseTable]));
+  }
+
+  const organic = report.organic;
+  if (organic) {
+    root.append(el("h3", {}, ["Regular Google results"]));
+    const counts = organic.directory_counts || {};
+    const top5 = counts.top5_directory_count == null ? "missing" : `${counts.top5_directory_count} of ${counts.top5_results}`;
+    const top10 = counts.top10_directory_count == null ? "missing" : `${counts.top10_directory_count} of ${counts.top10_results}`;
+    root.append(el("p", {}, [`Directories in top 5: ${top5}. Directories in top 10: ${top10}. This does not change the Maps competition score.`]));
+    if (organic.error && organic.error.message) root.append(el("p", { class: "error" }, [organic.error.message]));
+    (organic.results || []).forEach((result) => {
+      root.append(el("p", {}, [`${result.rank}. ${result.title || "Untitled"} — ${result.domain || "unknown"}${result.directory ? " (directory)" : ""}`]));
+    });
+  }
+
+  const trends = report.trends;
+  if (trends) {
+    const season = trends.seasonality || {};
+    const geo = trends.geo || {};
+    root.append(el("h3", {}, ["Seasonality"]));
+    root.append(el("p", {}, [
+      `Level ${season.level || "missing"}. Geo ${geo.level || "unknown"}. ${geo.note || ""} Trends interest is not search volume and does not change the demand index.`
+    ]));
+    if (season.peak_months && season.peak_months.length) root.append(el("p", {}, [`Peak months: ${season.peak_months.join(", ")}.`]));
+    if (trends.error && trends.error.message && season.status !== "measured") root.append(el("p", { class: "error" }, [trends.error.message]));
+    (season.series || []).forEach((month) => {
+      root.append(el("p", {}, [`${month.label}: ${month.value == null ? "missing" : month.value}`]));
+    });
+  }
 
   const maps = report.maps;
   const unique = maps.deduplication.unique_organic_listings;

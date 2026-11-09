@@ -39,9 +39,21 @@ function toMapsRows(rows) {
   }));
 }
 
+const TRENDS_OFFSET = 200000;
+
+function toTrendsRows(rows) {
+  const shifted = new Map(rows.map((row) => [row.location_code, row.location_code + TRENDS_OFFSET]));
+  return rows.map((row) => ({
+    ...row,
+    location_code: shifted.get(row.location_code),
+    location_code_parent: row.location_code_parent == null ? null : shifted.get(row.location_code_parent)
+  }));
+}
+
 const ROWS = {
   google_ads: ADS_ROWS,
-  google_maps: toMapsRows(ADS_ROWS)
+  google_maps: toMapsRows(ADS_ROWS),
+  google_trends: toTrendsRows(ADS_ROWS)
 };
 
 export const EXAMPLE_GAZETTEER_NOTE = "Bundled example gazetteer for example mode and tests. It is not the DataForSEO location directory, and its location codes are not DataForSEO location codes.";

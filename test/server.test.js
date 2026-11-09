@@ -147,9 +147,12 @@ test("live opt-in uses the injected transport and product-specific codes", async
     assert.equal(report.body.market_measurement.buyers_verified, false);
     assert.equal(report.body.market_measurement.exhaustive_market, false);
     const posts = calls.filter((call) => call.method === "POST");
-    assert.equal(posts.length, 2);
+    assert.equal(posts.length, 4);
     assert.equal(posts.every((call) => call.body[0].location_code > 9000000), true);
-    assert.notEqual(posts[0].body[0].location_code, posts[1].body[0].location_code);
+    const volume = posts.find((call) => call.path.endsWith("/search_volume/live"));
+    const maps = posts.find((call) => call.path.endsWith("/maps/live/advanced"));
+    assert.notEqual(volume.body[0].location_code, maps.body[0].location_code);
+    assert.equal(maps.body[0].depth, 100);
   });
 });
 

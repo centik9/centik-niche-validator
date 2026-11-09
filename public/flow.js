@@ -538,7 +538,7 @@ function renderGate() {
   const slot = $("deep-slot");
   slot.replaceChildren();
   slot.append(el("p", { class: "notice" }, [liveReady
-    ? "Live mode is on. This check is about $0.092: $0.09 for Google Ads and $0.002 for Maps. A repeated query within 7 days is not charged again."
+    ? "Live mode is on. This check is $0.105: $0.09 for Google Ads search volume, $0.002 for Maps depth 100, $0.002 for organic depth 10, and $0.011 for Google Trends. A repeated query within 24 hours is not charged again."
     : "Paid DataForSEO check is off. Yes did not authorize spending."]));
   slot.append(el("p", {}, [gate.reason]));
   if (!gate.example_check_available) {

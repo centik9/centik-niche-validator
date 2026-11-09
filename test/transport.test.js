@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { MAPS_PATH, SEARCH_VOLUME_PATH } from "../src/config.js";
+import { MAPS_PATH, ORGANIC_PATH, SEARCH_VOLUME_PATH, TRENDS_PATH } from "../src/config.js";
 import { assertSafeRequest, createLiveTransport } from "../src/dataforseo.js";
 import { createRedactor } from "../src/redact.js";
 
@@ -30,15 +30,65 @@ function mapsBody(extra = {}) {
   }];
 }
 
+function organicBody(extra = {}) {
+  return [{
+    keyword: "emergency plumber",
+    location_code: 9101007,
+    language_code: "en",
+    depth: 10,
+    device: "desktop",
+    os: "windows",
+    ...extra
+  }];
+}
+
+function trendsBody(extra = {}) {
+  return [{
+    keywords: ["emergency plumber"],
+    location_code: 9201007,
+    language_code: "en",
+    type: "web",
+    time_range: "past_12_months",
+    item_types: ["google_trends_graph"],
+    ...extra
+  }];
+}
+
 test("refuses billable shapes that would widen or enlarge the query", () => {
   assert.doesNotThrow(() => assertSafeRequest({ method: "POST", path: SEARCH_VOLUME_PATH, body: volumeBody() }));
+  assert.doesNotThrow(() => assertSafeRequest({
+    method: "POST",
+    path: SEARCH_VOLUME_PATH,
+    body: volumeBody({ keywords: ["emergency plumber", "emergency plumber austin", "austin emergency plumber"] })
+  }));
   assert.doesNotThrow(() => assertSafeRequest({ method: "POST", path: MAPS_PATH, body: mapsBody({ depth: 100 }) }));
+  assert.doesNotThrow(() => assertSafeRequest({ method: "POST", path: ORGANIC_PATH, body: organicBody() }));
+  assert.doesNotThrow(() => assertSafeRequest({ method: "POST", path: TRENDS_PATH, body: trendsBody() }));
+  assert.doesNotThrow(() => assertSafeRequest({ method: "GET", path: "/v3/keywords_data/google_trends/locations/us" }));
   assert.throws(() => assertSafeRequest({ method: "POST", path: MAPS_PATH, body: mapsBody({ depth: 20 }) }), /depth/);
   assert.throws(() => assertSafeRequest({ method: "POST", path: MAPS_PATH, body: mapsBody({ depth: undefined }) }), /depth/);
   assert.throws(() => assertSafeRequest({ method: "POST", path: SEARCH_VOLUME_PATH, body: volumeBody({ location_name: "United States" }) }), /location_name/);
   assert.throws(() => assertSafeRequest({ method: "POST", path: SEARCH_VOLUME_PATH, body: volumeBody({ location_coordinate: "30,-97" }) }), /coordinates/);
-  assert.throws(() => assertSafeRequest({ method: "POST", path: SEARCH_VOLUME_PATH, body: [{ keywords: ["a", "b"], location_code: 1, language_code: "en", search_partners: false }] }), /one keyword/);
-  assert.throws(() => assertSafeRequest({ method: "POST", path: "/v3/serp/google/organic/live/advanced", body: [] }), /not used/);
+  assert.throws(() => assertSafeRequest({
+    method: "POST",
+    path: SEARCH_VOLUME_PATH,
+    body: [{ keywords: Array.from({ length: 21 }, (_, index) => `plumber phrase ${index}`), location_code: 1, language_code: "en", search_partners: false }]
+  }), /20/);
+  assert.throws(() => assertSafeRequest({
+    method: "POST",
+    path: SEARCH_VOLUME_PATH,
+    body: [{ keywords: ["emergency plumber", "Emergency Plumber"], location_code: 1, language_code: "en", search_partners: false }]
+  }), /Duplicate/);
+  assert.throws(() => assertSafeRequest({ method: "POST", path: ORGANIC_PATH, body: organicBody({ depth: 20 }) }), /depth/);
+  assert.throws(() => assertSafeRequest({ method: "POST", path: ORGANIC_PATH, body: organicBody({ load_async_ai_overview: true }) }), /Unexpected organic/);
+  assert.throws(() => assertSafeRequest({ method: "POST", path: ORGANIC_PATH, body: organicBody({ calculate_rectangles: true }) }), /Unexpected organic/);
+  assert.throws(() => assertSafeRequest({ method: "POST", path: ORGANIC_PATH, body: organicBody({ people_also_ask_click_depth: 2 }) }), /Unexpected organic/);
+  assert.throws(() => assertSafeRequest({ method: "POST", path: ORGANIC_PATH, body: organicBody({ keyword: "site:yelp.com plumber" }) }), /search operators/);
+  assert.throws(() => assertSafeRequest({ method: "POST", path: TRENDS_PATH, body: trendsBody({ keywords: ["emergency plumber", "hvac"] }) }), /one keyword/);
+  assert.throws(() => assertSafeRequest({ method: "POST", path: TRENDS_PATH, body: trendsBody({ type: "youtube" }) }), /web/);
+  assert.throws(() => assertSafeRequest({ method: "POST", path: TRENDS_PATH, body: trendsBody({ date_from: "2024-01-01" }) }), /date/);
+  assert.throws(() => assertSafeRequest({ method: "POST", path: "/v3/serp/google/organic/live/regular", body: organicBody() }), /not used/);
+  assert.throws(() => assertSafeRequest({ method: "POST", path: "/v3/keywords_data/google_trends/explore/task_post", body: trendsBody() }), /not used/);
   assert.doesNotThrow(() => assertSafeRequest({ method: "GET", path: "/v3/appendix/user_data" }));
   assert.throws(() => assertSafeRequest({ method: "GET", path: "/v3/appendix/user_data", body: [{ money: 1 }] }), /body/);
   assert.throws(() => assertSafeRequest({ method: "GET", path: "/v3/appendix/status" }), /not used/);

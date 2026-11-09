@@ -23,6 +23,17 @@ function money(amount) {
   return `$${Number(amount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+function quoteMoney(amount) {
+  return `$${Number(amount).toFixed(3)}`;
+}
+
+function metricText(metric) {
+  if (!metric || metric.value == null || metric.status === "missing") return "Missing";
+  if (metric.status === "failed") return "Failed";
+  if (metric.status === "partial") return `${metric.value} partial`;
+  return String(metric.value);
+}
+
 const ZONES = [
   { name: "No", from: 0, to: 15, c: "--z-no", line: "Weak market here. Not worth a site yet." },
   { name: "Low", from: 15, to: 30, c: "--z-low", line: "Thin market. Only worth it with a sharp angle." },
@@ -327,17 +338,27 @@ function renderQuote(quote, proposal) {
     ["Budget left", "—"]
   ];
   rows.forEach(([name, value]) => {
-    kv.append(el("dt", {}, [name]), el("dd", { class: "num" }, [value]));
+    kv.append(el("dt", {}, [name]), el("dd", { class: "num" }, [name === "Cost" && quote ? quoteMoney(quote.estimated_cost_usd) : value]));
   });
+  const calls = $("paid-calls");
+  if (calls) {
+    calls.replaceChildren();
+    (quote && quote.calls ? quote.calls : []).forEach((call) => {
+      calls.append(el("li", {}, [`${call.purpose}: ${quoteMoney(call.estimated_cost_usd)}`]));
+    });
+  }
   const cap = quote ? quote.cap_usd : 0;
   const used = quote ? quote.spent_usd : 0;
   $("spent-label").textContent = quote ? `${money(used)} of ${money(cap)}` : "$0.00";
   $("budget-bar").style.width = cap ? `${Math.min(100, (used / cap) * 100)}%` : "0";
   $("pay-go").disabled = !quote || state.busy;
   $("pay-cancel").disabled = !quote || state.busy;
+  const breakdown = quote && quote.calls && quote.calls.length
+    ? `${quote.calls.map((call) => `${call.purpose} ${quoteMoney(call.estimated_cost_usd)}`).join(". ")}. Total ${quoteMoney(quote.estimated_cost_usd)}. Location lists are free and are not in this cost.`
+    : "Google Ads search volume live $0.090. Maps live advanced, depth 100 $0.002. Google organic live, depth 10 $0.002. Google Trends explore live $0.011. Total $0.105.";
   $("paid-note").textContent = quote && quote.cache_hit
     ? "A saved result from the last 24 hours will be shown. It will not be billed again."
-    : "Google Ads search volume and Maps top 100. Location lists are free and are not in this cost.";
+    : breakdown;
   $("paid-pill").textContent = quote && !quote.live_mode ? "Live off" : "Quote";
 }
 
@@ -368,7 +389,107 @@ function renderResults(message, report) {
   });
   if (report.live_banner) slot.append(el("p", { class: "help" }, [report.live_banner]));
   if (report.example_banner) slot.append(el("p", { class: "help" }, [report.example_banner]));
-  if (report.live_composite) slot.append(el("p", { class: "help" }, [`Live composite ${report.live_composite.composite_display}. Competition uses the map pack, not demand.`]));
+  if (report.live_composite) slot.append(el("p", { class: "help" }, [`Live composite ${report.live_composite.composite_display}. Competition uses the Maps sample. Organic directory share does not change it.`]));
+  slot.append(renderPhrasePanel(report));
+  slot.append(renderOrganicPanel(report));
+  slot.append(renderSeasonality(report));
+}
+
+function renderPhrasePanel(report) {
+  const demand = report.demand || {};
+  const panel = el("section", { class: "res-wide" }, [
+    el("h3", {}, ["Search phrases"]),
+    el("p", { class: "help" }, [
+      `Core term volume ${metricText(demand.search_volume)}. Clustered coverage ${metricText(demand.clustered_coverage_volume)}. The demand index uses clustered coverage volume. Word-order twins count once. Missing phrases stay missing.`
+    ])
+  ]);
+  const rows = demand.keyword_rows || [];
+  if (!rows.length) {
+    panel.append(el("p", { class: "help" }, ["No phrase rows were returned."]));
+    return panel;
+  }
+  const table = el("table", { class: "phrase-table" });
+  table.append(el("thead", {}, [el("tr", {}, ["Phrase", "Monthly volume", "CPC", "Competition", "Low bid", "High bid"].map((heading) => el("th", {}, [heading])))]));
+  const body = el("tbody");
+  rows.forEach((row) => {
+    body.append(el("tr", {}, [
+      el("td", {}, [row.keyword || "—"]),
+      el("td", {}, [metricText(row.search_volume)]),
+      el("td", {}, [row.cpc && row.cpc.value != null ? money(row.cpc.value) : metricText(row.cpc)]),
+      el("td", {}, [row.paid_search_competition && row.paid_search_competition.value != null ? String(row.paid_search_competition.value) : metricText(row.paid_search_competition)]),
+      el("td", {}, [row.low_top_of_page_bid && row.low_top_of_page_bid.value != null ? money(row.low_top_of_page_bid.value) : metricText(row.low_top_of_page_bid)]),
+      el("td", {}, [row.high_top_of_page_bid && row.high_top_of_page_bid.value != null ? money(row.high_top_of_page_bid.value) : metricText(row.high_top_of_page_bid)])
+    ]));
+  });
+  table.append(body);
+  panel.append(el("div", { class: "scroll" }, [table]));
+  return panel;
+}
+
+function renderOrganicPanel(report) {
+  const organic = report.organic || {};
+  const counts = organic.directory_counts || {};
+  const panel = el("section", { class: "res-wide" }, [el("h3", {}, ["Regular Google results"])]);
+  if (organic.status === "failed" || organic.status === "missing" || organic.status === "unsupported") {
+    panel.append(el("p", { class: "help" }, [
+      organic.error && organic.error.message
+        ? organic.error.message
+        : "Regular Google results are missing. That does not change the Maps competition score."
+    ]));
+    return panel;
+  }
+  const top5 = counts.top5_directory_count == null ? "Missing" : `${counts.top5_directory_count} of ${counts.top5_results}`;
+  const top10 = counts.top10_directory_count == null ? "Missing" : `${counts.top10_directory_count} of ${counts.top10_results}`;
+  panel.append(el("p", { class: "help" }, [
+    `Directories in the top 5 organic results: ${top5}. Directories in the top 10: ${top10}. Maps listing room stays the competition score.`
+  ]));
+  const list = el("ol", { class: "organic-list" });
+  (organic.results || []).forEach((result) => {
+    const safeUrl = typeof result.url === "string" && /^https?:\/\//i.test(result.url) ? result.url : "";
+    const title = safeUrl
+      ? el("a", { href: safeUrl, rel: "noreferrer" }, [result.title || result.domain || safeUrl])
+      : (result.title || "Untitled");
+    list.append(el("li", {}, [
+      title,
+      el("span", { class: result.directory ? "dir" : "host" }, [
+        `${result.domain || "unknown domain"}${result.directory ? " · directory" : ""}`
+      ])
+    ]));
+  });
+  if (!(organic.results || []).length) panel.append(el("p", { class: "help" }, ["No organic results were returned."]));
+  else panel.append(list);
+  return panel;
+}
+
+function renderSeasonality(report) {
+  const trends = report.trends || {};
+  const season = trends.seasonality || {};
+  const geo = trends.geo || {};
+  const panel = el("section", { class: "res-wide season-card" }, [el("h3", {}, ["Seasonality"])]);
+  const level = season.level ? season.level : "Missing";
+  const geoLabel = geo.level ? geo.level : "unknown";
+  panel.append(el("p", { class: "help" }, [
+    `Seasonality ${level}. Geo ${geoLabel}${geo.fallback_from_city ? " (broader than the city)" : ""}. ${geo.note || "Trends is relative interest, not search volume, and it does not change the demand index."}`
+  ]));
+  if (season.peak_months && season.peak_months.length) {
+    panel.append(el("p", {}, [`Peak months: ${season.peak_months.join(", ")}.`]));
+  }
+  const series = season.series || [];
+  if (!series.length) {
+    panel.append(el("p", { class: "help" }, [trends.error && trends.error.message ? trends.error.message : "No Trends series was returned. Missing interest is not zero demand."]));
+    return panel;
+  }
+  const bars = el("div", { class: "season-bars" });
+  const max = Math.max(1, ...series.map((month) => (Number.isInteger(month.value) ? month.value : 0)));
+  series.forEach((month) => {
+    const missing = !Number.isInteger(month.value);
+    const bar = el("span", { title: `${month.label}: ${missing ? "missing" : month.value}` });
+    bar.style.height = missing ? "0" : `${Math.max(4, Math.round((month.value / max) * 72))}px`;
+    if (missing) bar.className = "miss";
+    bars.append(el("i", {}, [bar, el("b", {}, [month.label.slice(0, 3)])]));
+  });
+  panel.append(bars);
+  return panel;
 }
 
 async function chooseSubniche(row) {
@@ -417,9 +538,10 @@ async function chooseLocation(card) {
     state.confirmed = { google_ads: side(resolved.google_ads.match), google_maps: side(resolved.google_maps.match) };
   } catch (error) {
     state.quote = null;
-    $("paid-note").textContent = error.message;
+    state.quoteError = error.message;
   }
   renderQuote(state.quote, state.proposal);
+  if (!state.quote && state.quoteError) $("paid-note").textContent = state.quoteError;
   paintStepper();
 }
 
@@ -453,7 +575,11 @@ async function runPaid() {
     });
     renderResults("", report);
     if (report.live_composite) {
-      renderGauge(report.live_composite, `${state.subniche.label} in ${state.location.name}, ${state.location.state}`);
+      renderGauge(
+        report.live_composite,
+        `${state.subniche.label} in ${state.location.name}, ${state.location.state}`,
+        "Demand uses clustered coverage volume. Competition is the Maps sample. Organic directory share and Trends seasonality do not change those scores."
+      );
       $("score-pill").textContent = "Live Google data";
     }
     $("paid-note").textContent = "The paid check finished. A repeat of this niche and market within 24 hours is not billed again.";
