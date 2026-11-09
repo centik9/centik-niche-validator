@@ -100,10 +100,18 @@ ul { margin-top: 6px; padding-left: 1.2rem; }
 .leader-score.band-red { color: #b42318; }
 .leader-score { background: transparent; font-weight: 700; }
 .band-missing .on { background: #efe6d6; }
-.gauge { margin: 0 0 12px; }
-.gauge svg { width: min(100%, 440px); height: auto; display: block; }
+.gauge { margin: 0 auto 12px; text-align: center; width: min(100%, 440px); }
+.gauge svg { width: 100%; height: auto; display: block; margin: 0 auto; }
+.gauge .pill { display: inline-block; margin: 2px auto 8px; padding: 3px 10px; border-radius: 999px; font-size: 0.82rem; font-weight: 650; }
+.pill-yes { background: #e5f4ea; color: #14633a; }
+.pill-no { background: #fff4e4; color: #8a4b08; }
+.score-table { margin: 0 auto 8px; border-collapse: collapse; font-size: 0.86rem; }
+.score-table th, .score-table td { padding: 3px 8px; }
+.score-table th { text-align: left; font-weight: 650; }
+.score-table td:last-child { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
+.gauge .demand-note { margin: 0 auto; max-width: 46ch; text-align: center; }
 .zone-word { margin: 0; font-weight: 700; font-size: 1.15rem; }
-.gauge-text, .source-line, .chain-line { color: var(--muted); font-size: 0.88rem; }
+.source-line, .chain-line { color: var(--muted); font-size: 0.88rem; }
 .est-tag { display: inline-block; margin-right: 4px; padding: 0 6px; border-radius: 999px; background: var(--warn-bg); color: var(--warn); font-size: 0.75rem; font-weight: 700; }
 .estimate-bar { height: 14px; margin: 6px 0; border-radius: 7px; background: repeating-linear-gradient(90deg, transparent 0 7px, rgba(29, 25, 20, 0.08) 7px 9px); }
 .estimate-bar span { display: block; height: 0; margin-top: 4px; border-top: 8px dashed currentColor; background: none; }

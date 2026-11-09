@@ -313,15 +313,17 @@ function gaugePoint(score, radius) {
   return [GAUGE_CX + radius * Math.cos(angle), GAUGE_CY - radius * Math.sin(angle)];
 }
 
-function wedgePath(start, end, radius) {
-  const [x1, y1] = gaugePoint(start, radius);
-  const [x2, y2] = gaugePoint(end, radius);
+function annularWedge(start, end, outer, inner) {
+  const [ox1, oy1] = gaugePoint(start, outer);
+  const [ox2, oy2] = gaugePoint(end, outer);
+  const [ix2, iy2] = gaugePoint(end, inner);
+  const [ix1, iy1] = gaugePoint(start, inner);
   const large = end - start > 50 ? 1 : 0;
-  return `M ${GAUGE_CX} ${GAUGE_CY} L ${x1} ${y1} A ${radius} ${radius} 0 ${large} 0 ${x2} ${y2} Z`;
+  return `M ${ox1} ${oy1} A ${outer} ${outer} 0 ${large} 0 ${ox2} ${oy2} L ${ix2} ${iy2} A ${inner} ${inner} 0 ${large} 1 ${ix1} ${iy1} Z`;
 }
 
 function face(score, mood) {
-  const [x, y] = gaugePoint(score, 68);
+  const [x, y] = gaugePoint(score, 84);
   const mouth = {
     sad: `M ${x - 7} ${y + 6} Q ${x} ${y - 1} ${x + 7} ${y + 6}`,
     frown: `M ${x - 6} ${y + 5} Q ${x} ${y + 1} ${x + 6} ${y + 5}`,
@@ -348,15 +350,17 @@ function renderGauge(composite) {
   const calculated = composite.status === "calculated";
   const score = calculated ? Number(composite.composite_display) : null;
   const zone = calculated ? zoneWord(score) : "Not calculated";
-  const greenLine = !calculated
-    ? "Clears green: not calculated."
+  const pillText = !calculated
+    ? "Not scored"
     : composite.clears_green_label === "on an estimated price"
-      ? "Clears green on an estimated price."
-      : `Clears green: ${composite.clears_green_label}.`;
+      ? "Clears green on an estimate"
+      : composite.clears_green_label === "yes"
+        ? "Clears green"
+        : "Below green";
   const label = calculated
-    ? `Composite ${composite.composite_display} out of 100. Zone ${zone}. ${greenLine}`
-    : "Composite withheld. Price range missing. Clears green: not calculated.";
-  const svg = svgEl("svg", { viewBox: "0 0 400 250", role: "img", "aria-label": label });
+    ? `Composite ${composite.composite_display} out of 100. Zone ${zone}. ${pillText}.`
+    : "Composite withheld. Price range missing. Not scored.";
+  const svg = svgEl("svg", { viewBox: "0 0 400 252", role: "img", "aria-label": label });
   const wedges = [
     [0, 15, "#c0392b", "sad"],
     [15, 30, "#e07a2f", "frown"],
@@ -364,15 +368,23 @@ function renderGauge(composite) {
     [60, 80, "#8fb83a", "smile"],
     [80, 100, "#1e7a46", "big"]
   ];
-  wedges.forEach(([start, end, color]) => svg.append(svgEl("path", { d: wedgePath(start, end, 108), fill: color })));
+  wedges.forEach(([start, end, color]) => {
+    svg.append(svgEl("path", { d: annularWedge(start, end, 112, 58), fill: color, stroke: "none" }));
+  });
+  [0, 15, 30, 60, 80, 100].forEach((boundary) => {
+    const [x1, y1] = gaugePoint(boundary, 58);
+    const [x2, y2] = gaugePoint(boundary, 112);
+    svg.append(svgEl("line", { x1, y1, x2, y2, stroke: "#fffdf8", "stroke-width": "3" }));
+  });
   wedges.forEach(([start, end, , mood]) => face((start + end) / 2, mood).forEach((node) => svg.append(node)));
   const [ringX, ringY] = gaugePoint(0, 124);
   const [ringEndX, ringEndY] = gaugePoint(100, 124);
   svg.append(svgEl("path", {
     d: `M ${ringX} ${ringY} A 124 124 0 0 1 ${ringEndX} ${ringEndY}`,
     fill: "none",
-    stroke: "#8d867c",
-    "stroke-width": "10"
+    stroke: "#b7b1a8",
+    "stroke-width": "14",
+    "stroke-linecap": "butt"
   }));
   [["No", 7.5], ["Low", 22.5], ["Medium", 45], ["High", 70], ["Max", 90]].forEach(([name, at]) => {
     const [x, y] = gaugePoint(at, 148);
@@ -396,14 +408,52 @@ function renderGauge(composite) {
       fill: "#1a1a1a"
     }));
   }
-  svg.append(svgEl("circle", { cx: GAUGE_CX, cy: GAUGE_CY, r: 16, fill: "#1a1a1a" }));
-  svg.append(svgEl("circle", { cx: GAUGE_CX, cy: GAUGE_CY, r: 7, fill: "#fffdf8" }));
+  svg.append(svgEl("circle", { cx: GAUGE_CX, cy: GAUGE_CY, r: 18, fill: "#1a1a1a" }));
+  svg.append(svgEl("circle", { cx: GAUGE_CX, cy: GAUGE_CY, r: 8, fill: "#fffdf8" }));
+  svg.append(svgEl("text", {
+    x: GAUGE_CX,
+    y: GAUGE_CY + 40,
+    "text-anchor": "middle",
+    "font-family": "Segoe UI, system-ui, sans-serif",
+    "font-size": "32",
+    "font-weight": "700",
+    fill: "#1d1914"
+  }, [calculated ? composite.composite_display : "—"]));
+  svg.append(svgEl("text", {
+    x: GAUGE_CX,
+    y: GAUGE_CY + 62,
+    "text-anchor": "middle",
+    "font-family": "Segoe UI, system-ui, sans-serif",
+    "font-size": "16",
+    "font-weight": "700",
+    fill: "#1d1914"
+  }, [zone]));
   const figure = el("figure", { class: "gauge" });
   figure.append(svg);
-  figure.append(el("p", { class: "score-number" }, [calculated ? composite.composite_display : "Price range missing"]));
-  figure.append(el("p", { class: "zone-word" }, [zone]));
-  figure.append(el("p", { class: "gauge-text" }, [greenLine]));
+  const pillClass = !calculated ? "pill-no" : composite.clears_green_label === "yes" ? "pill-yes" : "pill-no";
+  figure.append(el("p", { class: `pill ${pillClass}` }, [pillText]));
+  figure.append(scoreTable(composite));
   return figure;
+}
+
+function scoreTable(composite) {
+  const table = el("table", { class: "score-table" });
+  const demand = composite.demand;
+  const competition = composite.competition;
+  const margin = composite.margin;
+  const rows = [
+    ["Demand", demand.index === null || demand.index === undefined ? "—" : `${demand.index} × 40%`, demand.contribution_display || "—"],
+    ["Competition", competition.index === null || competition.index === undefined ? "—" : `${competition.index} × 30%`, competition.contribution_display || "—"],
+    ["Margin", margin.index === null || margin.index === undefined ? "—" : `${margin.index} × 30%`, margin.contribution_display || "—"]
+  ];
+  rows.forEach(([name, weight, points]) => {
+    table.append(el("tr", {}, [
+      el("th", {}, [name]),
+      el("td", {}, [weight]),
+      el("td", {}, [points])
+    ]));
+  });
+  return table;
 }
 
 function renderBreakdown(composite) {
@@ -436,10 +486,11 @@ function renderBreakdown(composite) {
 function renderProposal(proposal) {
   const slot = $("proposal-slot");
   slot.replaceChildren();
-  slot.append(renderGauge(proposal.composite));
+  const gauge = renderGauge(proposal.composite);
   if (proposal.deep_check_gate && proposal.deep_check_gate.demand_basis_note) {
-    slot.append(el("p", { class: "help" }, [proposal.deep_check_gate.demand_basis_note]));
+    gauge.append(el("p", { class: "help demand-note" }, [proposal.deep_check_gate.demand_basis_note]));
   }
+  slot.append(gauge);
   slot.append(renderBreakdown(proposal.composite));
   const card = el("article", { class: "proposal-card" });
   card.append(el("p", { class: "tag tag-example" }, ["Suggestion only"]));
