@@ -1,50 +1,70 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Centik Niche Validator</title>
-  <link rel="stylesheet" href="/styles.css">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Centik Niche Validator</title>
+<link rel="stylesheet" href="/styles.css">
 </head>
 <body>
-  <header class="mast">
-    <p class="mark">Centik</p>
-    <h1>Niche Validator</h1>
-    <p class="lede">Walk from a service idea to an example location, a microsite sketch, and an example market check.</p>
-    <p class="notice">Example data only. Bars are not Census demand and not Google search volume. Live and paid checks stay off.</p>
-    <p class="server-status" id="server-status">Checking server…</p>
-    <ol class="stepper" id="stepper">
-      <li data-step="context">1. Service</li>
-      <li data-step="locations">2. Locations</li>
-      <li data-step="proposal">3. Microsite</li>
-      <li data-step="deep_check">4. Check</li>
-    </ol>
+<div class="shell">
+  <header class="top">
+    <div class="brand"><span class="mark">Centik</span><span class="product">Niche Validator</span></div>
+    <div class="spacer"></div>
+    <span class="status" id="server-status"><i></i><span>Checking the server</span></span>
+    <a class="avatar" href="/logout" id="who" aria-label="Sign out">Out</a>
   </header>
-  <main>
-    <section class="panel" id="step-context">
-      <h2>What service are you exploring?</h2>
-      <p class="help">Type a keyword. Example sub-niches appear on their own. No city is asked here.</p>
-      <label class="field wide"><span>Service keyword</span>
-        <input id="keyword" autocomplete="off" maxlength="80" placeholder="plumbing">
+  <ol class="stepper" id="stepper" aria-label="Steps"></ol>
+  <main class="grid" id="grid">
+    <section class="card area-svc" aria-labelledby="h-svc">
+      <div class="card-h"><span class="step">Step 1</span><h2 id="h-svc">Service</h2><span class="sp"></span><span class="sample">Sample data</span></div>
+      <label class="field"><span>Service keyword</span>
+        <input id="keyword" type="text" maxlength="80" autocomplete="off" placeholder="plumbing">
       </label>
-      <p id="subniche-status" class="help" aria-live="polite">Type a service keyword to see example suggestions.</p>
-      <div id="subniche-slot"></div>
+      <p class="help" id="lb-help">Example data only until a confirmed live check. Type a service. Ranked sub-niches use example demand.</p>
+      <ol class="lb" id="lb"></ol>
     </section>
-    <section class="panel" id="step-locations" hidden>
-      <h2>Example locations</h2>
-      <p class="help" id="location-note"></p>
-      <div id="location-cards"></div>
+    <section class="card area-gauge" aria-labelledby="h-g">
+      <div class="card-h"><span class="step">Step 3</span><h2 id="h-g">Market score</h2><span class="sp"></span><span class="sample" id="score-pill">Sample data</span></div>
+      <p class="help" id="score-title">Pick a sub-niche and a city.</p>
+      <div id="dialwrap"></div>
+      <div class="readout"><span class="score num"><span id="num">0</span><small>/ 100</small></span><span id="chipwrap"></span></div>
+      <p class="verdict" id="verdict"></p>
+      <div class="bd" id="bd"></div>
     </section>
-    <section class="panel" id="step-proposal" hidden>
-      <h2>Microsite sketch</h2>
-      <div id="proposal-slot"></div>
+    <section class="card area-map" aria-labelledby="h-map">
+      <div class="card-h"><span class="step">Step 2</span><h2 id="h-map">Locations</h2><span class="sp"></span><span class="sample">Sample data</span></div>
+      <div id="mapwrap"></div>
+      <p class="help">Stylized, not a real map. Glow shows sample demand.</p>
+      <ul class="locs" id="locs"></ul>
     </section>
-    <section class="panel" id="step-deep" hidden>
-      <h2>Example market check</h2>
-      <div id="deep-slot"></div>
+    <section class="card area-est" id="est-card" hidden aria-labelledby="h-est">
+      <div class="card-h"><h2 id="h-est">Estimates</h2><span class="est-tag">EST.</span><span class="sp"></span><span class="sample" id="est-pill">Sample data</span></div>
+      <div class="kpis" id="kpis"></div>
+    </section>
+    <section class="card area-paid" aria-labelledby="h-paid">
+      <div class="card-h"><span class="step">Step 4</span><h2 id="h-paid">Confirm paid check</h2><span class="sp"></span><span class="sample" id="paid-pill">Sample data</span></div>
+      <div class="warn" role="note"><span aria-hidden="true">!</span><span>This check costs money. Nothing runs until you press okay.</span></div>
+      <dl class="kv" id="paid-kv"></dl>
+      <div class="budget"><div class="row"><span>Spend to date</span><b class="num" id="spent-label">$0.00</b></div><div class="track"><span id="budget-bar" style="width:0"></span></div></div>
+      <div class="actions">
+        <button class="btn pri" type="button" id="pay-go" disabled>Okay, run paid check</button>
+        <button class="btn ghost" type="button" id="pay-cancel" disabled>Cancel</button>
+      </div>
+      <p class="help" id="paid-note"></p>
+    </section>
+    <section class="card area-site" aria-labelledby="h-site">
+      <div class="card-h"><span class="step">Step 3</span><h2 id="h-site">Microsite sketch</h2><span class="sp"></span><span class="sample">Suggestion only</span></div>
+      <div class="site-prev" id="site"></div>
+    </section>
+    <section class="card area-res" aria-labelledby="h-res">
+      <div class="card-h"><h2 id="h-res">Last check results</h2><span class="sp"></span><span class="sample" id="res-pill">Sample data</span></div>
+      <div class="res-grid" id="results"></div>
     </section>
   </main>
-  <noscript><p class="notice">This page needs JavaScript to walk through the example.</p></noscript>
-  <script src="/flow.js"></script>
+  <p class="foot">Fixture numbers keep a Sample data pill. A paid check runs only after Okay.</p>
+  <p class="sr" aria-live="polite" id="live"></p>
+</div>
+<script src="/dashboard.js"></script>
 </body>
 </html>
