@@ -10,7 +10,7 @@ import { createExampleTransport } from "../src/example-transport.js";
 import { liveCompetitionIndex } from "../src/live-market.js";
 import { nearbyPlaces } from "../src/nearby.js";
 import { createLocationDirectory } from "../src/locations.js";
-import { createSpendGate, QUERY_COST_USD } from "../src/spend.js";
+import { accountSpentUsd, createSpendGate, QUERY_COST_USD } from "../src/spend.js";
 import { confirmedFrom, postJson, sessionCookie, TEST_AUTH, TEST_CODE, withServer } from "./helpers.js";
 
 const NOW = Date.parse("2026-11-09T12:00:00.000Z");
@@ -284,6 +284,40 @@ test("a spend token is rejected when it is signed badly, expired, or for another
     });
     assert.equal(fetches, 0);
   });
+});
+
+test("account spend uses total minus balance when total_spent is absent", async () => {
+  const onlyBalance = { tasks: [{ result: [{ money: { total: 10, balance: 8.82855 } }] }] };
+  assert.equal(accountSpentUsd(onlyBalance), 1.17145);
+  assert.equal(accountSpentUsd({ tasks: [{ result: [{ money: { total_spent: 1.171449 } }] }] }), 1.17145);
+  assert.equal(accountSpentUsd({ tasks: [{ result: [{ money: { total: 10 } }] }] }), null);
+  assert.equal(accountSpentUsd({ tasks: [{ result: [{ money: { balance: 1 } }] }] }), null);
+  assert.equal(accountSpentUsd({ tasks: [{ result: [{ money: { total: "10", balance: 1 } }] }] }), null);
+  const prepared = {
+    niche: "emergency plumber",
+    city: "Austin",
+    state: "Texas",
+    countryCanonical: "United States",
+    confirmed: { google_ads: { location_code: 1 }, google_maps: { location_code: 2 } }
+  };
+  const derived = createSpendGate({
+    capUsd: 10,
+    tokenSecret: "secret",
+    baselineUsd: 1.17145,
+    now: () => NOW,
+    readAccountSpent: async () => onlyBalance
+  });
+  const quoted = await derived.quote("team@centik.ai", prepared, { requireAccount: true });
+  assert.equal(quoted.account_total_spent_usd, 1.17145);
+  assert.equal(quoted.spent_usd, 0);
+  const missingFields = createSpendGate({
+    capUsd: 10,
+    tokenSecret: "secret",
+    baselineUsd: 1.17145,
+    now: () => NOW,
+    readAccountSpent: async () => ({ tasks: [{ result: [{ money: { total: 2 } }] }] })
+  });
+  await assert.rejects(() => missingFields.quote("team@centik.ai", prepared, { requireAccount: true }), /missing or below/);
 });
 
 test("the account baseline caps live spend and fails closed", async () => {

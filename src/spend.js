@@ -19,12 +19,23 @@ function dollars(units) {
   return Math.round(units) / SCALE;
 }
 
+function roundSpent(value) {
+  return Math.round(value * 1e5) / 1e5;
+}
+
 export function accountSpentUsd(payload) {
   const task = payload && Array.isArray(payload.tasks) ? payload.tasks[0] : null;
   const result = task && task.result;
   const row = Array.isArray(result) ? result[0] : result;
-  const spent = row && row.money && row.money.total_spent;
-  return typeof spent === "number" && Number.isFinite(spent) ? spent : null;
+  const money = row && row.money;
+  if (!money || typeof money !== "object") return null;
+  if (Object.prototype.hasOwnProperty.call(money, "total_spent") && money.total_spent != null) {
+    return typeof money.total_spent === "number" && Number.isFinite(money.total_spent) ? roundSpent(money.total_spent) : null;
+  }
+  if (typeof money.total === "number" && Number.isFinite(money.total) && typeof money.balance === "number" && Number.isFinite(money.balance)) {
+    return roundSpent(money.total - money.balance);
+  }
+  return null;
 }
 
 export function paidCalls() {
@@ -145,7 +156,7 @@ export function createSpendGate(options = {}) {
     }
     const parsed = typeof current === "number" ? current : accountSpentUsd(current);
     if (parsed == null || parsed + 0.000001 < baselineUsd) {
-      const error = new Error("DataForSEO money.total_spent is missing or below the go-live baseline. Live checks are refused. No paid request was sent.");
+      const error = new Error("DataForSEO account spend is missing or below the go-live baseline. Live checks are refused. No paid request was sent.");
       error.code = "spend_account_unavailable";
       error.status = 403;
       throw error;

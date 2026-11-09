@@ -201,7 +201,7 @@ export function createExampleTransport() {
     async request({ method, path, body }) {
       assertSafeRequest({ method, path, body });
       if (method === "GET" && path === USER_DATA_PATH) {
-        return { tasks: [{ status_code: 20000, result: [{ money: { total_spent: 0 } }] }] };
+        return { tasks: [{ status_code: 20000, result: [{ money: { total: 0, balance: 0 } }] }] };
       }
       if (method === "GET" && /^\/v3\/(?:keywords_data\/google_ads|serp\/google)\/locations\/[a-z]{2}$/.test(path)) {
         const iso = path.slice(-2);

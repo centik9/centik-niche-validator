@@ -127,7 +127,7 @@ Copy the names from `.env.example`. Put real values in the host environment, not
 | `DATAFORSEO_PASSWORD` | DataForSEO API password. Same rule as the login. |
 | `DATAFORSEO_LIVE` | Must be the exact string `true` to allow live calls. `TRUE`, `1`, and `yes` leave live mode off. |
 | `SPEND_CAP_USD` | Total cap for paid calls since go-live, in USD. Default `10`. |
-| `DATAFORSEO_SPENT_BASELINE_USD` | DataForSEO `money.total_spent` at go-live. Set once. The check is current `GET /v3/appendix/user_data` total minus this baseline, plus the quote. If this is missing, or that free call fails, live runs are refused. |
+| `DATAFORSEO_SPENT_BASELINE_USD` | Go-live account spend, set once. DataForSEO's free `GET /v3/appendix/user_data` has `money.total` and `money.balance`, not `money.total_spent`, so spend is `total − balance` unless `total_spent` is present. The production baseline is the derived value `1.17145`. The check is current spend minus this baseline, plus the quote. If this is missing, or that free call fails, or the fields are not finite numbers, live runs are refused. |
 | `SPEND_LEDGER_PATH` | JSON ledger of paid calls. Default `./data/spend-ledger.json`. Each row stores the timestamp, user, niche, market, calls, and the cost DataForSEO returned. |
 | `SPEND_TOKEN_SECRET` | HMAC key for the one-time spend token. There is no default. |
 | `ALLOWED_EMAILS` | Comma-separated emails that may sign in. Default `team@centik.ai`. |
