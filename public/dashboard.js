@@ -423,7 +423,7 @@ function renderQuote(quote, proposal) {
   const warnText = $("paid-warn-text");
   if (warnText) {
     warnText.textContent = stored
-      ? "This check costs money. Nothing runs until you confirm Rerun paid check."
+      ? "This check costs money. Nothing runs until you press Rerun paid check."
       : "This check costs money. Nothing runs until you press Okay.";
   }
   paintStamp();
@@ -902,10 +902,15 @@ function openEnlarged(card) {
   const open = card.querySelector(".enlarge");
   const close = card.querySelector(".enlarge-close");
   window.clearTimeout(enlargeTimer);
+  if (scrim.parentNode !== document.body) document.body.append(scrim);
   scrim.hidden = false;
   document.body.classList.add("card-focus");
   if (!enlargeHome) {
-    enlargeHome = document.createComment("enlarge-home");
+    enlargeHome = document.createElement("div");
+    enlargeHome.className = "enlarge-holder";
+    enlargeHome.setAttribute("aria-hidden", "true");
+    enlargeHome.style.width = `${card.offsetWidth}px`;
+    enlargeHome.style.height = `${card.offsetHeight}px`;
     card.parentNode.insertBefore(enlargeHome, card);
     document.body.append(card);
   }

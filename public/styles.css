@@ -220,23 +220,36 @@ body {
   position: fixed;
   inset: 0;
   z-index: 1000;
-  background: rgba(6, 8, 12, .8);
+  background: #000;
   opacity: 0;
   transition: opacity 200ms linear;
 }
-.card-scrim.open { opacity: 1; }
+.card-scrim.open { opacity: .8; }
 body.card-focus { overflow: hidden; }
+body.card-focus .shell { filter: blur(12px); }
+.enlarge-holder {
+  visibility: hidden;
+  pointer-events: none;
+}
 .card.is-enlarged {
   position: fixed;
   z-index: 1001;
   top: 50%;
   left: 50%;
+  display: flex;
+  flex-direction: column;
   width: min(1200px, 92vw);
   max-height: 90vh;
   overflow: auto;
   margin: 0;
   transform: translate(-50%, -50%);
   animation: enlarge-in 200ms ease;
+}
+.card.is-enlarged .card-h { flex: 0 0 auto; }
+.card.is-enlarged .map {
+  max-height: min(380px, 40vh);
+  width: 100%;
+  height: auto;
 }
 @keyframes enlarge-in {
   from { opacity: 0; transform: translate(-50%, -50%) scale(0.98); }

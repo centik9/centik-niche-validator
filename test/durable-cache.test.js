@@ -279,11 +279,15 @@ test("dashboard copy keeps the rerun label, stamp, and enlarge control", async (
   assert.match(html, /id="paid-warn"[^>]*hidden/);
   assert.match(html, /id="paid-warn-text"/);
   assert.match(html, /Nothing runs until you press Okay\./);
-  assert.match(dashboard, /Nothing runs until you confirm Rerun paid check\./);
+  assert.match(dashboard, /Nothing runs until you press Rerun paid check\./);
   assert.match(dashboard, /Saved check/);
   assert.match(dashboard, /No sketch yet/);
   assert.match(dashboard, /pill\.textContent = "Confirm"/);
-  assert.match(dashboard, /enlarge-home/);
+  assert.match(dashboard, /enlarge-holder/);
+  assert.match(css, /background:\s*#000/);
+  assert.match(css, /\.card-scrim\.open \{ opacity: \.8/);
+  assert.match(css, /body\.card-focus \.shell \{ filter: blur\(12px\)/);
+  assert.match(css, /max-height: min\(380px, 40vh\)/);
   assert.match(css, /min\(1200px, 92vw\)/);
   assert.match(css, /flex-wrap:\s*nowrap/);
   assert.match(css, /\.enlarge\[hidden\], \.enlarge-close\[hidden\], \.warn\[hidden\], \.card-scrim\[hidden\]/);
