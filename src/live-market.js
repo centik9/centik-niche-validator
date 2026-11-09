@@ -3,8 +3,16 @@ import { bandFor } from "./scoring.js";
 export const LIVE_LABEL = "Live Google data";
 export const EXAMPLE_LABEL = "Example data";
 
-function measured(field) {
-  return field && (field.status === "measured" || field.status === "measured_zero") && Number.isInteger(field.value);
+function measured(metric) {
+  return metric && (metric.status === "measured" || metric.status === "measured_zero") && Number.isInteger(metric.value);
+}
+
+function clusteredIndexVolume(demand) {
+  const clustered = demand && demand.clustered_coverage_volume;
+  if (!clustered || demand.demand_index_uses !== "clustered_coverage_volume" || !Number.isInteger(clustered.value)) return null;
+  if (clustered.status === "measured" || clustered.status === "measured_zero") return clustered.value;
+  if (clustered.status === "partial" && clustered.value > 0) return clustered.value;
+  return null;
 }
 
 export const LISTING_ROOM_CAP = 100;
@@ -27,6 +35,8 @@ export function cityMarketFromReports(demand, maps, origin) {
       demand_index: null,
       competition_index: null,
       search_volume: null,
+      clustered_coverage_volume: null,
+      demand_index_input: "clustered_coverage_volume",
       unique_listings: null,
       listings_without_website: null,
       average_reviews: null,
@@ -34,7 +44,8 @@ export function cityMarketFromReports(demand, maps, origin) {
     };
   }
   const volume = demand && demand.search_volume;
-  const band = measured(volume) ? bandFor(volume.value) : null;
+  const clusteredVolume = clusteredIndexVolume(demand);
+  const band = clusteredVolume === null ? null : bandFor(clusteredVolume);
   const listingsField = maps && maps.deduplication && maps.deduplication.unique_organic_listings;
   const listings = measured(listingsField) ? listingsField.value : null;
   const withoutWebsite = Number.isInteger(maps && maps.listings_without_website) ? maps.listings_without_website : 0;
@@ -48,9 +59,12 @@ export function cityMarketFromReports(demand, maps, origin) {
     demand_index: band ? band.index : null,
     competition_index: liveCompetitionIndex({ listings, withoutWebsite, averageReviews }),
     search_volume: measured(volume) ? volume.value : null,
+    clustered_coverage_volume: clusteredVolume,
+    demand_index_input: "clustered_coverage_volume",
+    demand_index_note: "The demand index is the band of clustered coverage volume. The core term volume is search_volume and is not the index input. Missing keyword rows are omitted from the sum, not entered as zero.",
     unique_listings: listings,
     listings_without_website: listings === null ? null : withoutWebsite,
     average_reviews: listings === null ? null : Math.round(averageReviews),
-    formula: "Live competition index = round(0.5 × listing room + 0.3 × share with no website + 0.2 × (100 − review pressure)). Listing room is round(100 × (100 − min(unique organic listings, 100)) / 100), so 40 listings scores differently from 90. It does not use max(3, round(28 − demand / 4))."
+    formula: "Live competition index = round(0.5 × listing room + 0.3 × share with no website + 0.2 × (100 − review pressure)). Listing room is round(100 × (100 − min(unique organic listings, 100)) / 100), so 40 listings scores differently from 90. It does not use max(3, round(28 − demand / 4)). Regular Google organic directory share is a supporting signal and is not an input to this index."
   };
 }

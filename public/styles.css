@@ -302,7 +302,23 @@ body {
 .pages { list-style: none; margin: 0; padding: 0; }
 .pages li { display: flex; justify-content: space-between; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--line); }
 .pages li span { color: var(--muted-strong); }
+.call-list { margin: 12px 0 0; padding-left: 18px; color: var(--muted-strong); }
+.call-list li { margin: 4px 0; }
 .res-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.res-wide { grid-column: 1 / -1; border: 1px solid var(--line); border-radius: 14px; padding: 12px; background: #0c111a; }
+.res-wide h3 { margin: 0 0 8px; font-size: 1rem; }
+.phrase-table { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
+.phrase-table th, .phrase-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+.organic-list { margin: 8px 0 0; padding-left: 18px; }
+.organic-list li { margin: 6px 0; }
+.organic-list a { color: var(--cyan); }
+.organic-list .dir { color: #fbbf24; margin-left: 8px; }
+.organic-list .host { color: var(--muted); margin-left: 8px; }
+.season-bars { display: flex; align-items: flex-end; gap: 6px; min-height: 96px; margin-top: 8px; }
+.season-bars i { display: flex; flex-direction: column; align-items: center; gap: 4px; flex: 1; font-style: normal; }
+.season-bars span { display: block; width: 100%; background: var(--cyan); border-radius: 3px 3px 0 0; }
+.season-bars span.miss { background: transparent; border-top: 2px dashed var(--line); height: 8px !important; }
+.season-bars b { font-weight: 500; color: var(--muted); font-size: 0.68rem; }
 .res { border: 1px solid var(--line); border-radius: 14px; padding: 12px; background: #0c111a; }
 .res .l { color: var(--muted-strong); }
 .res .v { font-size: 1.4rem; font-weight: 700; }

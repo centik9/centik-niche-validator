@@ -6,7 +6,11 @@ import {
   MAPS_DEVICE,
   MAPS_OS,
   MAPS_PATH,
+  ORGANIC_DEPTH,
+  ORGANIC_PATH,
   SEARCH_VOLUME_PATH,
+  TRENDS_PATH,
+  TRENDS_UPSTREAM_TIMEOUT_MS,
   adsLocationsPath,
   mapsLocationsPath
 } from "./config.js";
@@ -16,6 +20,10 @@ import { parseResolveInput, parseValidateInput } from "./input.js";
 import { STANDING_LIMITATIONS } from "./limitations.js";
 import { combineLocationOutcomes, matchCity } from "./locations.js";
 import { mapsFromError, mapsNotSent, parseMapsPayload } from "./maps.js";
+import { organicFromError, organicNotSent, parseOrganicPayload } from "./organic.js";
+import { trendsFromError, trendsNotSent, parseTrendsPayload } from "./trends.js";
+import { selectTrendsLocation } from "./trends-location.js";
+import { buildVolumeKeywords } from "./volume-keywords.js";
 import { cityMarketFromReports } from "./live-market.js";
 import { scoreFromIndexes } from "./composite-score.js";
 import { buildScore } from "./scoring.js";
@@ -171,8 +179,9 @@ async function loadDemand(prepared, resolution, deps) {
     audit.reason_not_sent = message;
     return { report: demandNotSent({ status, keyword: prepared.niche, message, code: status }), audit };
   }
+  const keywords = buildVolumeKeywords(prepared.niche, prepared.city);
   const task = {
-    keywords: [prepared.niche],
+    keywords,
     location_code: match.location_code,
     language_code: LANGUAGE_CODE,
     search_partners: false
@@ -181,6 +190,7 @@ async function loadDemand(prepared, resolution, deps) {
     const payload = await deps.transport.request({ method: "POST", path: SEARCH_VOLUME_PATH, body: [task] });
     const report = parseDemandPayload(payload, {
       keyword: prepared.niche,
+      keywords,
       location: match,
       sentToDataForSeo: deps.origin === "live",
       redact: deps.redact
@@ -191,6 +201,7 @@ async function loadDemand(prepared, resolution, deps) {
   } catch (error) {
     const report = demandFromError(error, {
       keyword: prepared.niche,
+      keywords,
       location: match,
       sentToDataForSeo: deps.origin === "live",
       redact: deps.redact
@@ -258,6 +269,133 @@ async function loadMaps(prepared, resolution, deps) {
   }
 }
 
+async function loadOrganic(prepared, resolution, deps) {
+  const match = resolution.google_maps.match;
+  const audit = {
+    endpoint: `POST ${ORGANIC_PATH}`,
+    billable_when_live: true,
+    sent_to_dataforseo: false,
+    invoked: false,
+    reason_not_sent: null
+  };
+  if (!match) {
+    const status = resolution.google_maps.outcome === "failed" ? "failed" : "unsupported";
+    const message = "No confirmed Google Maps city location. Regular Google results were not requested.";
+    audit.reason_not_sent = message;
+    return { report: organicNotSent({ status, message, code: status, keyword: prepared.niche }), audit };
+  }
+  const task = {
+    keyword: prepared.niche,
+    location_code: match.location_code,
+    language_code: LANGUAGE_CODE,
+    depth: ORGANIC_DEPTH,
+    device: MAPS_DEVICE,
+    os: MAPS_OS
+  };
+  try {
+    const payload = await deps.transport.request({ method: "POST", path: ORGANIC_PATH, body: [task] });
+    const report = parseOrganicPayload(payload, {
+      keyword: prepared.niche,
+      location: match,
+      sentToDataForSeo: deps.origin === "live",
+      redact: deps.redact
+    });
+    audit.invoked = true;
+    audit.sent_to_dataforseo = deps.origin === "live";
+    return { report, audit };
+  } catch (error) {
+    const report = organicFromError(error, {
+      keyword: prepared.niche,
+      location: match,
+      sentToDataForSeo: deps.origin === "live",
+      redact: deps.redact
+    });
+    audit.sent_to_dataforseo = report.sent_to_dataforseo;
+    audit.invoked = report.sent_to_dataforseo;
+    audit.reason_not_sent = report.sent_to_dataforseo ? null : report.error && report.error.message;
+    return { report, audit };
+  }
+}
+
+async function loadTrends(prepared, deps) {
+  const audit = {
+    endpoint: `POST ${TRENDS_PATH}`,
+    billable_when_live: true,
+    sent_to_dataforseo: false,
+    invoked: false,
+    reason_not_sent: null
+  };
+  const query = {
+    cityNorm: prepared.cityNorm,
+    stateNorm: prepared.stateNorm,
+    countryIso: prepared.countryIso,
+    codeSource: deps.codeSource
+  };
+  let geo;
+  try {
+    const listed = await deps.directory.list("google_trends", prepared.countryIso);
+    geo = selectTrendsLocation(listed.rows, query);
+    audit.location_list_cache = listed.cache;
+  } catch (error) {
+    const report = trendsFromError(error, {
+      keyword: prepared.niche,
+      geo: null,
+      sentToDataForSeo: false,
+      redact: deps.redact
+    });
+    report.sent_to_dataforseo = false;
+    audit.reason_not_sent = report.error && report.error.message;
+    return { report, audit };
+  }
+  if (!geo.match) {
+    const report = trendsNotSent({
+      status: "missing",
+      keyword: prepared.niche,
+      geo,
+      message: geo.note,
+      code: "trends_location_unavailable"
+    });
+    audit.reason_not_sent = geo.note;
+    return { report, audit };
+  }
+  const task = {
+    keywords: [prepared.niche],
+    location_code: geo.match.location_code,
+    language_code: LANGUAGE_CODE,
+    type: "web",
+    time_range: "past_12_months",
+    item_types: ["google_trends_graph"]
+  };
+  try {
+    const payload = await deps.transport.request({
+      method: "POST",
+      path: TRENDS_PATH,
+      body: [task],
+      timeoutMs: TRENDS_UPSTREAM_TIMEOUT_MS
+    });
+    const report = parseTrendsPayload(payload, {
+      keyword: prepared.niche,
+      geo,
+      sentToDataForSeo: deps.origin === "live",
+      redact: deps.redact
+    });
+    audit.invoked = true;
+    audit.sent_to_dataforseo = deps.origin === "live";
+    return { report, audit };
+  } catch (error) {
+    const report = trendsFromError(error, {
+      keyword: prepared.niche,
+      geo,
+      sentToDataForSeo: deps.origin === "live",
+      redact: deps.redact
+    });
+    audit.sent_to_dataforseo = report.sent_to_dataforseo;
+    audit.invoked = report.sent_to_dataforseo;
+    audit.reason_not_sent = report.sent_to_dataforseo ? null : report.error && report.error.message;
+    return { report, audit };
+  }
+}
+
 export async function resolveLocation(input, deps) {
   const prepared = input && input.cityNorm ? input : parseResolveInput(input);
   return resolvePrepared(prepared, deps);
@@ -267,9 +405,11 @@ export async function validateNiche(input, deps) {
   const prepared = input && input.cityNorm && input.confirmed ? input : parseValidateInput(input);
   const resolution = await resolvePrepared(prepared, deps);
   assertConfirmation(resolution, prepared.confirmed);
-  const [demand, maps] = await Promise.all([
+  const [demand, maps, organic, trends] = await Promise.all([
     loadDemand(prepared, resolution, deps),
-    loadMaps(prepared, resolution, deps)
+    loadMaps(prepared, resolution, deps),
+    loadOrganic(prepared, resolution, deps),
+    loadTrends(prepared, deps)
   ]);
   const score = buildScore({ demand: demand.report, maps: maps.report, origin: deps.origin });
   const cityMarket = cityMarketFromReports(demand.report, maps.report, deps.origin);
@@ -306,10 +446,19 @@ export async function validateNiche(input, deps) {
     },
     demand: demand.report,
     maps: maps.report,
-    city_market: cityMarket,
+    organic: organic.report,
+    trends: trends.report,
+    city_market: {
+      ...cityMarket,
+      organic_directory_share: organic.report.directory_counts,
+      organic_used_in_competition_index: false,
+      trends_seasonality: trends.report.seasonality && trends.report.seasonality.level,
+      trends_geo_level: trends.report.geo && trends.report.geo.level,
+      trends_used_as_search_volume: false
+    },
     live_composite: liveComposite,
     score,
-    requests: [...resolution.requests, demand.audit, maps.audit],
+    requests: [...resolution.requests, demand.audit, maps.audit, organic.audit, trends.audit],
     limitations: STANDING_LIMITATIONS
   };
 }

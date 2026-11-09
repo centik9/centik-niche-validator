@@ -1,7 +1,8 @@
-import { MAPS_PATH, SEARCH_VOLUME_PATH, USER_DATA_PATH } from "./config.js";
+import { MAPS_PATH, ORGANIC_PATH, SEARCH_VOLUME_PATH, TRENDS_PATH, USER_DATA_PATH } from "./config.js";
 import { assertSafeRequest } from "./dataforseo.js";
 import { DataForSeoError } from "./errors.js";
 import { exampleRows } from "./gazetteer.js";
+import { clusterKey } from "./keyword-clusters.js";
 
 const FIXTURES = {
   "missing volume": { volume: "missing", maps: "default" },
@@ -62,7 +63,17 @@ function months(value) {
   return rows;
 }
 
-function keywordRow(keyword, locationCode, kind) {
+function phraseVolume(keyword, core, kind) {
+  if (kind === "missing") return null;
+  if (kind === "zero") return 0;
+  const sameCluster = clusterKey(keyword) === clusterKey(core);
+  if (kind === "uneven") return sameCluster ? 80 : 2;
+  return sameCluster ? 320 : 10;
+}
+
+function keywordRow(keyword, core, locationCode, kind) {
+  const volume = phraseVolume(keyword, core, kind);
+  const coreRow = keyword.trim().toLowerCase() === String(core || "").trim().toLowerCase();
   if (kind === "missing") {
     return {
       keyword,
@@ -81,37 +92,92 @@ function keywordRow(keyword, locationCode, kind) {
   }
   const row = {
     keyword,
-    spell: kind === "spell" ? "emergency plumber" : null,
+    spell: kind === "spell" && coreRow ? "emergency plumber" : null,
     location_code: locationCode,
     language_code: "en",
     search_partners: false,
-    competition: "MEDIUM",
-    competition_index: 42,
-    search_volume: 320,
-    low_top_of_page_bid: 3.25,
-    high_top_of_page_bid: 11.5,
-    cpc: 8.5,
-    monthly_searches: months(320)
+    competition: volume === 0 ? "LOW" : "MEDIUM",
+    competition_index: volume === 0 ? 0 : 42,
+    search_volume: volume,
+    low_top_of_page_bid: volume === 0 ? null : 3.25,
+    high_top_of_page_bid: volume === 0 ? null : 11.5,
+    cpc: volume === 0 ? 0 : (coreRow ? 8.5 : 4.25),
+    monthly_searches: months(kind === "uneven" && coreRow ? 100 : volume)
   };
-  if (kind === "zero") {
-    return {
-      ...row,
-      competition: "LOW",
-      competition_index: 0,
-      search_volume: 0,
-      low_top_of_page_bid: null,
-      high_top_of_page_bid: null,
-      cpc: 0,
-      monthly_searches: months(0)
-    };
-  }
-  if (kind === "missing_cpc") {
+  if (kind === "missing_cpc" && coreRow) {
     return { ...row, cpc: null, low_top_of_page_bid: null, high_top_of_page_bid: null };
   }
-  if (kind === "uneven") {
-    return { ...row, search_volume: 80, monthly_searches: months(100) };
-  }
   return row;
+}
+
+function organicResult(keyword, locationCode) {
+  const pages = [
+    ["https://www.yelp.com/search?find_desc=plumber", "www.yelp.com", "Yelp plumbers"],
+    ["https://austinplumbing.example/emergency", "austinplumbing.example", "Austin Plumbing"],
+    ["https://www.angi.com/plumbers", "www.angi.com", "Angi plumbers"],
+    ["https://www.thumbtack.com/tx/austin/plumbers", "www.thumbtack.com", "Thumbtack plumbers"],
+    ["https://local-plumber.example/", "local-plumber.example", "Local Plumber"],
+    ["https://www.bbb.org/austin/plumbers", "www.bbb.org", "BBB plumbers"],
+    ["https://www.yellowpages.com/austin-tx/plumbers", "www.yellowpages.com", "Yellow Pages"],
+    ["https://roundrockplumbing.example/", "roundrockplumbing.example", "Round Rock Plumbing"],
+    ["https://www.houzz.com/professionals/plumbers", "www.houzz.com", "Houzz plumbers"],
+    ["https://www.homeadvisor.com/plumbers", "www.homeadvisor.com", "HomeAdvisor plumbers"]
+  ];
+  const items = [
+    { type: "paid", rank_absolute: 1, title: "Paid ad", url: "https://ads.example/plumber", domain: "ads.example" },
+    { type: "people_also_ask", rank_absolute: 2, title: "People also ask" }
+  ];
+  pages.forEach((page, index) => {
+    items.push({
+      type: "organic",
+      rank_group: index + 1,
+      rank_absolute: index + 3,
+      title: page[2],
+      url: page[0],
+      domain: page[1]
+    });
+  });
+  return [{
+    keyword,
+    type: "organic",
+    location_code: locationCode,
+    language_code: "en",
+    items_count: items.length,
+    items
+  }];
+}
+
+function trendsGraph(keyword, locationCode) {
+  const flat = [48, 50, 47, 51, 49, 52, 50, 48, 49, 51, 50, 47];
+  const seasonal = /hvac|heating|cooling/i.test(keyword);
+  const monthValues = seasonal ? [20, 22, 30, 45, 70, 95, 100, 92, 60, 35, 24, 20] : flat;
+  const data = [];
+  for (let month = 1; month <= 12; month += 1) {
+    for (let week = 0; week < 4; week += 1) {
+      const day = Math.min(1 + week * 7, 28);
+      const date = `2025-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+      data.push({
+        date_from: date,
+        date_to: date,
+        timestamp: Date.UTC(2025, month - 1, day) / 1000,
+        missing_data: false,
+        values: [monthValues[month - 1]]
+      });
+    }
+  }
+  return [{
+    keywords: [keyword],
+    type: "trends",
+    location_code: locationCode,
+    language_code: "en",
+    items_count: 1,
+    items: [{
+      type: "google_trends_graph",
+      title: "Interest over time",
+      keywords: [keyword],
+      data
+    }]
+  }];
 }
 
 function organic(n, city) {
@@ -203,18 +269,21 @@ export function createExampleTransport() {
       if (method === "GET" && path === USER_DATA_PATH) {
         return { tasks: [{ status_code: 20000, result: [{ money: { total: 0, balance: 0 } }] }] };
       }
-      if (method === "GET" && /^\/v3\/(?:keywords_data\/google_ads|serp\/google)\/locations\/[a-z]{2}$/.test(path)) {
+      if (method === "GET" && /\/locations\/[a-z]{2}$/.test(path)) {
         const iso = path.slice(-2);
-        const product = path.includes("google_ads") ? "google_ads" : "google_maps";
+        let product = "google_maps";
+        if (path.includes("google_ads")) product = "google_ads";
+        else if (path.includes("google_trends")) product = "google_trends";
         const rows = exampleRows(product).filter((row) => String(row.country_iso_code).toLowerCase() === iso);
         return envelope(rows, 0);
       }
       const task = taskOf(body);
       if (method === "POST" && path === SEARCH_VOLUME_PATH) {
-        const keyword = task.keywords && task.keywords[0];
-        const spec = fixtureFor(keyword);
+        const keywords = Array.isArray(task.keywords) ? task.keywords : [];
+        const core = keywords[0];
+        const spec = fixtureFor(core);
         if (spec.volume === "failed") return failureEnvelope();
-        return envelope([keywordRow(keyword, task.location_code, spec.volume)], 0);
+        return envelope(keywords.map((keyword) => keywordRow(keyword, core, task.location_code, spec.volume)), 0);
       }
       if (method === "POST" && path === MAPS_PATH) {
         const spec = fixtureFor(task.keyword);
@@ -223,6 +292,13 @@ export function createExampleTransport() {
         }
         if (spec.maps === "failed") return failureEnvelope();
         return envelope(mapsResult(spec.maps, task.keyword, task.location_code), 0);
+      }
+      if (method === "POST" && path === ORGANIC_PATH) {
+        return envelope(organicResult(task.keyword, task.location_code), 0);
+      }
+      if (method === "POST" && path === TRENDS_PATH) {
+        const keyword = task.keywords && task.keywords[0];
+        return envelope(trendsGraph(keyword, task.location_code), 0);
       }
       throw new DataForSeoError("refused", "Example transport has no fixture for that request.");
     }

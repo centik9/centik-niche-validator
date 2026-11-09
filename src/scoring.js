@@ -16,11 +16,11 @@ export const DEMAND_BANDS = [
 ];
 
 export const FORMULA = {
-  demand_index: "Select the inclusive band containing search_volume. The highest band index is 90, not 100.",
+  demand_index: "Select the inclusive band containing clustered coverage volume, the sum of each cluster's maximum measured monthly searches. Word-order and stopword twins count once. The core term volume is reported separately and is not this input. Missing clusters are omitted, not added as zero. The highest band index is 90, not 100.",
   sample_openness: "100 - (100 * min(unique_organic_listings, requested_depth) / requested_depth). requested_depth is 100.",
   overall: "round_half_up((65 * demand_index + 35 * sample_openness) / 10) / 10. Calculated only when both inputs are measured numbers and unique organic listings is greater than zero.",
   rounding: "The tenth is rounded half away from zero with integer arithmetic, so binary floating point does not decide it.",
-  confidence: "Start at 35 hundredths. Add 15 when at least 6 monthly values are numeric, plus 5 more when at least 12 are numeric, plus 10 when both products resolved to City or Municipality. Subtract 10 when the organic sample fills the depth cap, and 5 when Google Ads spell-corrects the keyword. Clamp between 20 and 75 hundredths. Withheld when the combined index is withheld."
+  confidence: "Start at 35 hundredths. Add 15 when at least 6 monthly values on the core term are numeric, plus 5 more when at least 12 are numeric, plus 10 when both products resolved to City or Municipality. Subtract 10 when the Maps sample fills the depth cap, and 5 when Google Ads spell-corrects the keyword. Clamp between 20 and 75 hundredths. Withheld when the combined index is withheld. Regular Google directory share and Trends seasonality are not inputs."
 };
 
 export function bandFor(searchVolume) {
@@ -64,7 +64,7 @@ function confidenceAdjustments(input) {
       id: "base",
       hundredths: 35,
       applied: true,
-      reason: "One keyword, approximate Google Ads volumes, and a Maps sample capped at 20."
+      reason: "Packed Google Ads phrases collapsed into clusters, approximate volumes, and a Maps sample capped at 100."
     },
     {
       id: "six_monthly_values",
@@ -99,11 +99,27 @@ function confidenceAdjustments(input) {
   ];
 }
 
+function indexSource(demand) {
+  if (demand && demand.clustered_coverage_volume && demand.demand_index_uses === "clustered_coverage_volume") {
+    return { volume: demand.clustered_coverage_volume, name: "clustered_coverage_volume" };
+  }
+  return { volume: demand.search_volume, name: "search_volume" };
+}
+
+function usableVolume(volume) {
+  if (!volume || !Number.isInteger(volume.value)) return false;
+  if (volume.status === "measured" || volume.status === "measured_zero") return true;
+  return volume.status === "partial" && volume.value > 0;
+}
+
 export function buildScore({ demand, maps, origin }) {
-  const volume = demand.search_volume;
+  const source = indexSource(demand);
+  const volume = source.volume;
+  const core = demand.search_volume;
   const unique = maps.deduplication.unique_organic_listings;
   const depth = maps.requested_depth;
-  const volumeMeasured = isMeasuredStatus(volume.status) && Number.isInteger(volume.value);
+  const volumeMeasured = usableVolume(volume);
+  const coreMeasured = core && isMeasuredStatus(core.status) && Number.isInteger(core.value);
   const uniqueMeasured = isMeasuredStatus(unique.status) && Number.isInteger(unique.value) && unique.value >= 0;
 
   let matchedBand = null;
@@ -121,6 +137,7 @@ export function buildScore({ demand, maps, origin }) {
   const flags = [];
   if (origin === "example") flags.push("example_data");
   if (volume.status === "measured_zero") flags.push("measured_zero_demand");
+  if (volume.status === "partial") flags.push("clustered_volume_partial");
   if (uniqueMeasured && unique.value === 0) flags.push("maps_sample_empty");
   if (uniqueMeasured && unique.value > 0 && unique.value < depth / 2) flags.push("maps_sample_sparse");
   if (uniqueMeasured && unique.value >= depth) flags.push("maps_sample_saturated");
@@ -187,7 +204,10 @@ export function buildScore({ demand, maps, origin }) {
     interpretation.push(withheldReason);
   } else {
     interpretation.push(`The combined index is ${overall.display}. It is not a recommendation to enter a market.`);
-    interpretation.push(`Demand band "${matchedBand.label}" from search volume ${volume.value} contributes weight 0.65 as demand index ${demandIndex}.`);
+    interpretation.push(`Demand band "${matchedBand.label}" from ${source.name} ${volume.value} contributes weight 0.65 as demand index ${demandIndex}.`);
+    if (source.name === "clustered_coverage_volume") {
+      interpretation.push("The demand index uses clustered coverage volume. The core term volume is separate. Word-order twins are not summed twice, and a missing phrase is not zero.");
+    }
     interpretation.push(`The Maps sample has ${unique.value} unique organic listings out of ${depth} requested, so sample openness is ${openness} at weight 0.35.`);
     if (volume.status === "measured_zero") {
       interpretation.push("Average monthly searches were measured as 0. That is a measured zero, not missing data. The demand index is 0.");
@@ -212,8 +232,11 @@ export function buildScore({ demand, maps, origin }) {
     bands: DEMAND_BANDS,
     matched_band: matchedBand,
     inputs: {
-      search_volume: volumeMeasured ? volume.value : null,
-      search_volume_status: volume.status,
+      search_volume: coreMeasured ? core.value : null,
+      search_volume_status: core ? core.status : volume.status,
+      clustered_coverage_volume: source.name === "clustered_coverage_volume" && Number.isInteger(volume.value) ? volume.value : null,
+      clustered_coverage_status: source.name === "clustered_coverage_volume" ? volume.status : null,
+      demand_index_input: source.name,
       unique_organic_listings: uniqueMeasured ? unique.value : null,
       unique_organic_listings_status: unique.status,
       requested_depth: depth,

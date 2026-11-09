@@ -1,6 +1,9 @@
 import { CPC_UNIT, LANGUAGE_CODE, SEARCH_VOLUME_PATH, VOLUME_SOURCE, VOLUME_UNIT } from "./config.js";
+import { clusterCoverage } from "./keyword-clusters.js";
 import { classifyNumber, field } from "./measurement.js";
 import { readTask } from "./provider.js";
+
+const CLUSTER_NOTE = "Clustered coverage volume is the sum of one representative monthly search volume per cluster. Phrases that match after lowercasing, dropping stopwords (a, an, the, and, or, in, on, at, to, for, of, with, by, from), sorting the remaining words, and folding a trailing s on words of 6 or more letters that do not end in ss share a cluster. The representative is the maximum measured volume in that cluster, so word-order twins are not added twice. A cluster with no measured row is missing and is not added as zero. The demand index uses this sum. The core term stays on search_volume and is not the index input.";
 
 const PAID_NOTE = "Google Ads paid-SERP advertiser competition. Not the number of local businesses, and not used in the score.";
 const CPC_NOTE = "Average cost per click in USD reported by Google Ads. Not revenue, not customer value, and not used in the score. CPC is not multiplied by search volume.";
@@ -106,13 +109,91 @@ function integerOrClassify(value) {
   return classified;
 }
 
-function shell({ status, keyword, location, sentToDataForSeo, message, code, monthlyStatus }) {
+function volumeNumber(metric) {
+  if (!metric) return null;
+  if (metric.status === "measured" || metric.status === "measured_zero") return metric.value;
+  return null;
+}
+
+function metricsFromItem(item, keyword) {
+  const volume = integerOrClassify(item ? item.search_volume : undefined);
+  const monthly = item ? parseMonthly(item.monthly_searches) : blankMonthly("missing");
+  const cpc = item ? classifyNumber(item.cpc) : { status: "missing", value: null };
+  const low = item ? classifyNumber(item.low_top_of_page_bid) : { status: "missing", value: null };
+  const high = item ? classifyNumber(item.high_top_of_page_bid) : { status: "missing", value: null };
+  const index = item ? integerOrClassify(item.competition_index) : { status: "missing", value: null };
+  return {
+    keyword,
+    returned: Boolean(item),
+    spell: item ? spellField(item.spell, keyword) : { status: "none", value: null },
+    search_volume: field(item ? volume.status : "missing", item ? volume.value : null, { unit: VOLUME_UNIT, source: VOLUME_SOURCE }),
+    cpc: field(cpc.status, cpc.value, { unit: CPC_UNIT, excluded_from_score: true, note: CPC_NOTE }),
+    low_top_of_page_bid: field(low.status, low.value, { unit: "USD", excluded_from_score: true, note: BID_NOTE }),
+    high_top_of_page_bid: field(high.status, high.value, { unit: "USD", excluded_from_score: true, note: BID_NOTE }),
+    paid_search_competition: item ? competitionField(item.competition) : field("missing", null, { excluded_from_score: true, note: PAID_NOTE }),
+    paid_search_competition_index: field(index.status, index.value, {
+      unit: "Google Ads index 0-100",
+      excluded_from_score: true,
+      note: PAID_NOTE
+    }),
+    monthly_searches: monthly
+  };
+}
+
+function coverageField(coverage) {
+  const status = coverage && coverage.status ? coverage.status : "missing";
+  const value = coverage && Number.isInteger(coverage.value) ? coverage.value : null;
+  return field(status, value, {
+    unit: VOLUME_UNIT,
+    source: VOLUME_SOURCE,
+    demand_index_input: true,
+    partial: Boolean(coverage && coverage.partial),
+    missing_cluster_count: coverage ? coverage.missing_cluster_count : 0,
+    measured_cluster_count: coverage ? coverage.measured_cluster_count : 0,
+    note: CLUSTER_NOTE
+  });
+}
+
+function keywordRowsFrom(sent, resultRows) {
+  const rows = Array.isArray(resultRows) ? resultRows : [];
+  const byKeyword = new Map();
+  for (const row of rows) {
+    if (!row || typeof row.keyword !== "string") continue;
+    byKeyword.set(row.keyword.trim().toLowerCase(), row);
+  }
+  const phrases = Array.isArray(sent) && sent.length ? sent : [];
+  const keywordRows = phrases.map((keyword) => metricsFromItem(byKeyword.get(String(keyword).trim().toLowerCase()) || null, keyword));
+  for (const row of rows) {
+    if (!row || typeof row.keyword !== "string") continue;
+    const key = row.keyword.trim().toLowerCase();
+    if (phrases.some((keyword) => String(keyword).trim().toLowerCase() === key)) continue;
+    keywordRows.push(metricsFromItem(row, row.keyword));
+  }
+  return keywordRows;
+}
+
+function attachCoverage(report, keywordRows) {
+  const coverage = clusterCoverage(keywordRows.map((row) => ({ keyword: row.keyword, volume: volumeNumber(row.search_volume) })));
+  report.keyword_rows = keywordRows;
+  report.clusters = coverage.clusters;
+  report.clustered_coverage_volume = coverageField(coverage);
+  report.demand_index_uses = "clustered_coverage_volume";
+  return report;
+}
+
+function shell({ status, keyword, keywords, location, sentToDataForSeo, message, code, monthlyStatus }) {
   const monthly = blankMonthly(monthlyStatus || status);
+  const sent = Array.isArray(keywords) && keywords.length ? keywords : (keyword ? [keyword] : []);
   return {
     status,
     endpoint: `POST ${SEARCH_VOLUME_PATH}`,
     keyword_sent: keyword,
+    keywords_sent: sent,
     keyword_returned: null,
+    keyword_rows: [],
+    clusters: [],
+    clustered_coverage_volume: coverageField(null),
+    demand_index_uses: "clustered_coverage_volume",
     spell: { status: "none", value: null },
     search_volume: field(status, null, { unit: VOLUME_UNIT, source: VOLUME_SOURCE, period: null }),
     cpc: field(status, null, { unit: CPC_UNIT, excluded_from_score: true, note: CPC_NOTE }),
@@ -152,11 +233,13 @@ export function demandNotSent({ status, keyword, message, code }) {
 }
 
 export function parseDemandPayload(payload, context) {
+  const sentKeywords = Array.isArray(context.keywords) && context.keywords.length ? context.keywords : [context.keyword];
   const read = readTask(payload);
   if (!read.ok) {
     const failed = shell({
       status: "failed",
       keyword: context.keyword,
+      keywords: sentKeywords,
       location: context.location,
       sentToDataForSeo: context.sentToDataForSeo,
       message: clipMessage(context.redact, read.message),
@@ -166,18 +249,20 @@ export function parseDemandPayload(payload, context) {
     return failed;
   }
   const rows = Array.isArray(read.result) ? read.result : [];
+  const keywordRows = keywordRowsFrom(sentKeywords, rows);
   const item = rows.find((row) => row && typeof row.keyword === "string" && row.keyword.trim().toLowerCase() === context.keyword.trim().toLowerCase()) || null;
   if (!item) {
     const missing = shell({
       status: "missing",
       keyword: context.keyword,
+      keywords: sentKeywords,
       location: context.location,
       sentToDataForSeo: context.sentToDataForSeo,
-      message: "DataForSEO returned no keyword row. That is not a measured zero.",
+      message: "DataForSEO returned no core keyword row. That is not a measured zero.",
       code: "missing_result"
     });
     missing.provider_reported_cost_usd = costField(read.cost === null ? "missing" : read.cost === 0 ? "measured_zero" : "measured", read.cost);
-    return missing;
+    return attachCoverage(missing, keywordRows);
   }
 
   const volume = integerOrClassify(item.search_volume);
@@ -185,6 +270,7 @@ export function parseDemandPayload(payload, context) {
   const report = shell({
     status: volume.status,
     keyword: context.keyword,
+    keywords: sentKeywords,
     location: context.location,
     sentToDataForSeo: context.sentToDataForSeo,
     message: null
@@ -232,7 +318,7 @@ export function parseDemandPayload(payload, context) {
       message: "The payload says search partners were included. This app requests search_partners false. Treat the volume as a different definition than a Google-only count."
     };
   }
-  return report;
+  return attachCoverage(report, keywordRows);
 }
 
 export function demandFromError(error, context) {
@@ -240,6 +326,7 @@ export function demandFromError(error, context) {
   return shell({
     status: "failed",
     keyword: context.keyword,
+    keywords: context.keywords,
     location: context.location,
     sentToDataForSeo: sent,
     message: clipMessage(context.redact, error && error.message),

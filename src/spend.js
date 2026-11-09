@@ -1,12 +1,17 @@
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { MAPS_PATH, SEARCH_VOLUME_PATH } from "./config.js";
+import { MAPS_PATH, ORGANIC_PATH, SEARCH_VOLUME_PATH, TRENDS_PATH } from "./config.js";
+import { VOLUME_KEYWORD_SET_ID } from "./volume-keywords.js";
 
 export const ADS_COST_USD = 0.09;
 export const MAPS_COST_USD = 0.002;
-export const QUERY_COST_USD = 0.092;
+export const ORGANIC_COST_USD = 0.002;
+export const TRENDS_COST_USD = 0.011;
+export const QUERY_COST_USD = 0.105;
 export const MAPS_LIVE_DEPTH = 100;
+export const ORGANIC_LIVE_DEPTH = 10;
+export const RESULT_CACHE_VERSION = "microsite-v2";
 export const TOKEN_MS = 5 * 60 * 1000;
 export const RESULT_CACHE_MS = 24 * 60 * 60 * 1000;
 const SCALE = 1000;
@@ -43,15 +48,28 @@ export function paidCalls() {
     {
       method: "POST",
       path: SEARCH_VOLUME_PATH,
-      purpose: "Google Ads search volume and CPC",
+      purpose: "Google Ads search volume live",
       estimated_cost_usd: ADS_COST_USD
     },
     {
       method: "POST",
       path: MAPS_PATH,
-      purpose: "Maps live advanced, top 100 organic competitors",
+      purpose: "Maps live advanced, depth 100",
       depth: MAPS_LIVE_DEPTH,
       estimated_cost_usd: MAPS_COST_USD
+    },
+    {
+      method: "POST",
+      path: ORGANIC_PATH,
+      purpose: "Google organic live, depth 10",
+      depth: ORGANIC_LIVE_DEPTH,
+      estimated_cost_usd: ORGANIC_COST_USD
+    },
+    {
+      method: "POST",
+      path: TRENDS_PATH,
+      purpose: "Google Trends explore live",
+      estimated_cost_usd: TRENDS_COST_USD
     }
   ];
 }
@@ -75,8 +93,19 @@ function sameBind(left, right) {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
-function cacheKey(bind) {
-  return `${bind.niche}|${bind.google_ads}|${bind.google_maps}`;
+export function resultCacheKey(bind) {
+  return [
+    RESULT_CACHE_VERSION,
+    `maps${MAPS_LIVE_DEPTH}`,
+    "organic10",
+    "trends-explore-12m",
+    VOLUME_KEYWORD_SET_ID,
+    bind.niche,
+    bind.city,
+    bind.state,
+    bind.google_ads,
+    bind.google_maps
+  ].join("|");
 }
 
 export function createSpendGate(options = {}) {
@@ -134,6 +163,8 @@ export function createSpendGate(options = {}) {
       query_cost_usd: QUERY_COST_USD,
       ads_cost_usd: ADS_COST_USD,
       maps_cost_usd: MAPS_COST_USD,
+      organic_cost_usd: ORGANIC_COST_USD,
+      trends_cost_usd: TRENDS_COST_USD,
       entries: entries.map((entry) => ({ ...entry }))
     };
   }
@@ -259,13 +290,13 @@ export function createSpendGate(options = {}) {
   }
 
   function freshResult(bind) {
-    const hit = results.get(cacheKey(bind));
+    const hit = results.get(resultCacheKey(bind));
     if (!hit || hit.expires <= now()) return null;
     return hit.value;
   }
 
   function remember(bind, value) {
-    results.set(cacheKey(bind), { expires: now() + RESULT_CACHE_MS, value });
+    results.set(resultCacheKey(bind), { expires: now() + RESULT_CACHE_MS, value });
   }
 
   function reportedCost(field, fallback) {
@@ -276,18 +307,17 @@ export function createSpendGate(options = {}) {
   }
 
   async function record(report, email, prepared) {
+    const callEntry = (endpoint, section, fallback) => ({
+      endpoint,
+      cost_usd: reportedCost(section && section.provider_reported_cost_usd, fallback),
+      cost_source: section && section.provider_reported_cost_usd && section.provider_reported_cost_usd.status === "measured" ? "provider" : "estimate_fallback"
+    });
     const calls = [
-      {
-        endpoint: `POST ${SEARCH_VOLUME_PATH}`,
-        cost_usd: reportedCost(report.demand && report.demand.provider_reported_cost_usd, ADS_COST_USD),
-        cost_source: report.demand && report.demand.provider_reported_cost_usd && report.demand.provider_reported_cost_usd.status === "measured" ? "provider" : "estimate_fallback"
-      },
-      {
-        endpoint: `POST ${MAPS_PATH}`,
-        cost_usd: reportedCost(report.maps && report.maps.provider_reported_cost_usd, MAPS_COST_USD),
-        cost_source: report.maps && report.maps.provider_reported_cost_usd && report.maps.provider_reported_cost_usd.status === "measured" ? "provider" : "estimate_fallback"
-      }
+      callEntry(`POST ${SEARCH_VOLUME_PATH}`, report.demand, ADS_COST_USD),
+      callEntry(`POST ${MAPS_PATH}`, report.maps, MAPS_COST_USD)
     ];
+    if (report.organic && report.organic.sent_to_dataforseo) calls.push(callEntry(`POST ${ORGANIC_PATH}`, report.organic, ORGANIC_COST_USD));
+    if (report.trends && report.trends.sent_to_dataforseo) calls.push(callEntry(`POST ${TRENDS_PATH}`, report.trends, TRENDS_COST_USD));
     const cost = dollars(calls.reduce((sum, call) => sum + milli(call.cost_usd), 0));
     entries.push({
       at: new Date(now()).toISOString(),

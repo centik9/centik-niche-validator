@@ -1,6 +1,6 @@
 # Centik Niche Validator
 
-In-house local niche check for one keyword in one explicitly named city. It reads Google Ads search demand and a capped Google Maps sample through DataForSEO, then applies a published heuristic. The index is not a grade, not a recommendation, and not an economic valuation.
+In-house check for whether a city and niche are worth a microsite. It reads packed Google Ads search demand, a 100-listing Google Maps sample, a first page of regular Google results, and Google Trends seasonality through DataForSEO, then applies a published heuristic. Maps listing room stays the competition score. The index is not a grade, not a recommendation, and not an economic valuation.
 
 Version 0.1.0 is safe to run with no credentials. Live DataForSEO calls are off unless the server process is started with `DATAFORSEO_LIVE=true`.
 
@@ -31,10 +31,12 @@ Rebuild the ACS extract with `node scripts/build-acs-extract.mjs`. That download
 
 ## What a result is
 
-A validation report has three separate pieces:
+A validation report has these separate pieces:
 
-- **Demand.** Approximate average monthly Google searches for one keyword, from Google Ads via DataForSEO `POST /v3/keywords_data/google_ads/search_volume/live`. CPC, top-of-page bids, and paid-search competition are shown beside it and are not part of the index.
-- **Maps sample.** Deduplicated organic listings from `POST /v3/serp/google/maps/live/advanced` with `depth` fixed at 20. Paid items and directory items are counted separately and excluded from the organic sample.
+- **Demand.** Approximate average monthly Google searches for a small packed phrase list, from one Google Ads task via DataForSEO `POST /v3/keywords_data/google_ads/search_volume/live`. The demand index uses clustered coverage volume: one maximum from each word-order cluster, summed. The core term stays visible separately. CPC, top-of-page bids, and paid-search competition are shown beside each phrase and are not part of the index.
+- **Maps sample.** Deduplicated organic listings from `POST /v3/serp/google/maps/live/advanced` with `depth` fixed at 100. Paid items and directory items are counted separately and excluded from the organic sample. This sample is the competition score.
+- **Regular Google results.** First page only, `POST /v3/serp/google/organic/live/advanced` at depth 10. Directory share is a supporting signal and does not change the Maps competition score.
+- **Seasonality.** Google Trends explore live, one keyword, past 12 months. Relative 0–100 interest only. It does not replace Ads volume and it does not penalize a seasonal niche.
 - **Heuristic index.** A weighted combination of a demand band and how full that 100-listing sample was. The formula, weights, inputs, completeness, and confidence adjustments are in every response. The combined index is withheld when it would have to be invented.
 
 `market_measurement.exhaustive_market`, `buyers_verified`, and `economic_value_estimated` are always `false`.
@@ -44,7 +46,8 @@ A validation report has three separate pieces:
 - It does not estimate revenue, customer counts, close rates, advertiser spend, or market size in dollars. CPC is not multiplied by search volume.
 - It does not treat a null from Google Ads as zero. Null, unsupported, and failed demand produce no combined index.
 - It does not treat an empty Maps sample as an open market. A measured zero listing count withholds the combined index. The demand index is still reported.
-- It does not claim the Maps sample is exhaustive. DataForSEO's endpoint defaults to 100 results and allows 700, billed per SERP of up to 100 results, with possible extra charges above 100. This app requests 20 and does not paginate.
+- It does not claim the Maps sample is exhaustive. DataForSEO bills one Maps SERP for up to 100 results. This app requests depth 100 and does not paginate past that.
+- It does not replace the Maps competition score with regular Google results, and it does not turn Trends interest into search volume.
 - It does not treat `se_results_count` as a census. DataForSEO documents it as the SERP total, and published examples can show `0` while items are present. It is never used in the score.
 - It does not treat `is_claimed` as a verified buyer. It means the Google listing has a claimed owner.
 - It does not pick a city by a partial or wrong-state name. `Springfield` in Illinois is not Springfield in Missouri. `Portland` in Maine is not Portland in Oregon, and it is not South Portland.
@@ -137,11 +140,11 @@ Copy the names from `.env.example`. Put real values in the host environment, not
 
 There is no `.env` loader. A file named `.env` is gitignored so it is not committed; this process does not read it. Inject the variables in the shell or the host.
 
-Live calls use HTTP Basic auth and are not retried. The transport refuses any endpoint other than the two uncharged location lists, the search-volume live call, and the Maps live call. It refuses `location_name`, `location_coordinate`, custom date ranges, more than one keyword, `search_partners: true`, and any Maps depth other than 100. Request bodies that contain the login or password are refused before send. Logs and error responses pass through a redactor for those values and for `Authorization: Basic` tokens.
+Live calls use HTTP Basic auth and are not retried. The transport allows the uncharged Ads, Maps, and Trends location lists, one packed search-volume live task, the Maps live call, one organic live call at depth 10, and one Trends explore live task. It refuses every other DataForSEO path. It refuses `location_name`, `location_coordinate`, custom date ranges, `search_partners: true`, more than 20 volume keywords, any Maps depth other than 100, organic depth other than 10, organic search operators, `load_async_ai_overview`, `calculate_rectangles`, and `people_also_ask_click_depth`. Trends sends one keyword, `type` `web`, and `time_range` `past_12_months`. Request bodies that contain the login or password are refused before send. Logs and error responses pass through a redactor for those values and for `Authorization: Basic` tokens.
 
 Location lists are cached in process memory for six hours. The cache is lost on restart. Those GET requests are not charged and are not written to the spend ledger.
 
-A live check is about $0.09 for Google Ads search volume plus $0.002 for Maps, $0.092 together. Those two rates are `ADS_COST_USD` and `MAPS_COST_USD` in `src/spend.js`. Nothing is sent until a signed-in person gets a quote from `POST /api/quote` and sends that one-time token to `POST /api/validate`. The token is HMAC-signed with `SPEND_TOKEN_SECRET`, bound to the user and the normalized niche, city, state, country, and location codes, and it expires in 5 minutes. A used token is remembered in memory. The same niche and market is served from a 24-hour result cache and is not paid again. The ledger adds the task cost DataForSEO returns. `GET /api/spend` returns the totals and requires the session.
+A live check is $0.105: Google Ads search volume live $0.09, Maps live advanced depth 100 $0.002, Google organic live depth 10 $0.002, and Google Trends explore live $0.011. Those rates are `ADS_COST_USD`, `MAPS_COST_USD`, `ORGANIC_COST_USD`, and `TRENDS_COST_USD` in `src/spend.js`, and `QUERY_COST_USD` is 0.105. Nothing is sent until a signed-in person gets a quote from `POST /api/quote` and sends that one-time token to `POST /api/validate`. The token is HMAC-signed with `SPEND_TOKEN_SECRET`, bound to the user and the normalized niche, city, state, country, and location codes, and it expires in 5 minutes. A used token is remembered in memory. The same niche and market is served from a 24-hour result cache whose key includes the check version, Maps depth 100, the packed keyword set, organic, and Trends, so an older depth-20 or volume-only result is not reused. The four paid calls run in parallel after confirm. The ledger adds the task cost DataForSEO returns. `GET /api/spend` returns the totals and requires the session.
 
 Live competition does not use `max(3, round(28 − demand / 4))`. The live index is `round(0.5 × listing room + 0.3 × share with no website + 0.2 × (100 − review pressure))`. Listing room is `round(100 × (100 − min(unique organic listings, 100)) / 100)`, so 40 listings scores differently from 90. The no-website share is that count divided by the deduped organic count. Review pressure is the average `votes_count` in the sample, capped at 100.
 
@@ -151,7 +154,7 @@ Live competition does not use `max(3, round(28 − demand / 4))`. The live index
 
 ## How demand and Maps are read
 
-Search volume requests send one keyword, `language_code` `en`, `search_partners` `false`, and the confirmed Google Ads city `location_code`. No date range is sent. DataForSEO's default is the past 12 months, and Google Ads does not return the current month. The report shows that request policy and the months actually present. The demand index uses the `search_volume` field, which DataForSEO describes as the approximate monthly average. A separate arithmetic mean of the monthly rows is only a cross-check.
+Search volume requests send one task with a short deterministic phrase list: the core niche, city word-order variants, “near me”, a simple plural, and a repair variant when the niche does not already say repair or service. `language_code` is `en`, `search_partners` is `false`, and the location is the confirmed Google Ads city `location_code`. No date range is sent. DataForSEO's default is the past 12 months, and Google Ads does not return the current month. Every returned phrase is kept, with its monthly volume, CPC, bids, and paid-search competition. The demand index uses clustered coverage volume, not the raw sum and not the core term alone. The core term remains `search_volume`. A separate arithmetic mean of the core term's monthly rows is only a cross-check.
 
 `competition` values `LOW`, `MEDIUM`, and `HIGH`, and `competition_index` 0–100, are Google Ads paid-SERP advertiser competition. They are not local business counts.
 
@@ -167,7 +170,7 @@ Requests use English. Searches in other languages are not measured. Google Ads m
 
 Weights: demand index `0.65`, sample openness `0.35`. The implementation uses integer percents `65` and `35`.
 
-Demand index, from approximate average monthly searches:
+Demand index, from clustered coverage volume (the sum of each cluster's maximum measured monthly searches, not the core term and not a raw sum of word-order twins):
 
 | Searches | Index | Label |
 | --- | ---: | --- |
@@ -262,10 +265,10 @@ Do this once, after the secrets are set, and not from a test:
 1. Set `DATAFORSEO_LIVE=true`, `DATAFORSEO_LOGIN`, `DATAFORSEO_PASSWORD`, `SPEND_TOKEN_SECRET`, `SESSION_SECRET`, and `TEAM_ACCESS_CODE_HASH`. Leave `SPEND_CAP_USD` at 10.
 2. Sign in at `/login`.
 3. Open one keyword in one city and press the paid-check button once.
-4. Expect one Google Ads call and one Maps call at depth 100. `GET /api/spend` should show the provider task costs, about $0.092 if DataForSEO bills the list prices. Maps depth 100 is still $0.002.
+4. Expect four paid calls: Google Ads search volume, Maps at depth 100, organic at depth 10, and Google Trends explore. `GET /api/spend` should show the provider task costs, about $0.105 if DataForSEO bills the list prices. Maps depth 100 is still $0.002. Organic depth 10 is $0.002. Trends explore live is $0.011.
 5. Run that same keyword and city again within 24 hours. The cache should answer it and the spend total should stay the same.
 
-Location-list lookups are free and cached. They are not part of the $0.092.
+Location-list lookups, including the Google Trends location list used to choose city, metro, state, or national, are free and cached. They are not part of the $0.105.
 
 ## Pending
 

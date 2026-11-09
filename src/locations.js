@@ -157,6 +157,7 @@ export function matchCity(rows, query) {
 export function productPaths(product, iso) {
   if (product === "google_ads") return `/v3/keywords_data/google_ads/locations/${iso}`;
   if (product === "google_maps") return `/v3/serp/google/locations/${iso}`;
+  if (product === "google_trends") return `/v3/keywords_data/google_trends/locations/${iso}`;
   throw new Error(`Unknown location product: ${product}`);
 }
 
