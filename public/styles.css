@@ -118,6 +118,7 @@ details p { margin: 6px 0; }
 .leader-score { color: var(--muted); font-size: 0.85rem; }
 .leader-row .bar.segments { margin: 6px 0; }
 .leader-evidence { margin: 0; color: var(--muted); font-size: 0.88rem; }
+.match-label { margin: 0 0 2px; color: var(--teal-ink); font-size: 0.78rem; font-weight: 650; }
 @media (max-width: 720px) {
   .leader-label { flex-direction: column; align-items: flex-start; }
 }

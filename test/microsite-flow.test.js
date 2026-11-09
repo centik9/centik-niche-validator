@@ -13,7 +13,7 @@ import { postJson, withServer } from "./helpers.js";
 const context = { keyword: "plumbing" };
 
 test("plumbing sub-niches are a 20-row composite leaderboard", () => {
-  const result = suggestSubniches("Emergency plumber");
+  const result = suggestSubniches("plumbing");
   assert.equal(result.known_profile, true);
   assert.equal(result.subniches.length, 20);
   assert.equal(new Set(result.subniches.map((item) => item.id)).size, 20);

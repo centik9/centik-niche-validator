@@ -127,8 +127,8 @@ function showSubniches(report, error) {
       type: "button",
       class: "leader-row",
       "aria-label": choice.composite.status === "calculated"
-        ? `Rank ${choice.example_rank}, ${choice.label}, composite ${choice.composite.composite_display}, ${choice.composite.band} band`
-        : `Rank ${choice.example_rank}, ${choice.label}, price range missing`
+        ? `Rank ${choice.example_rank}, ${choice.label}, composite ${choice.composite.composite_display}, ${choice.composite.band} band${choice.match && choice.match.label ? `, ${choice.match.label}` : ""}`
+        : `Rank ${choice.example_rank}, ${choice.label}, price range missing${choice.match && choice.match.label ? `, ${choice.match.label}` : ""}`
     }, [
       el("span", { class: "rank" }, [String(choice.example_rank)]),
       el("span", { class: "leader-body" }, [
@@ -139,6 +139,7 @@ function showSubniches(report, error) {
           ])
         ]),
         strengthBar(choice.composite.composite_display, choice.composite.band),
+        ...(choice.match && choice.match.label ? [el("p", { class: "match-label" }, [choice.match.label])] : []),
         el("p", { class: "leader-evidence" }, [
           choice.price.status === "published" ? `${choice.price.sentence} National range, not adjusted for a city.` : "Price range missing. Margin is missing, so this row is not scored."
         ])

@@ -1,4 +1,5 @@
-import { compareScoredRows, scoreExampleMarket } from "./composite-score.js";
+import { scoreExampleMarket } from "./composite-score.js";
+import { rankByQuery } from "./query-match.js";
 import { HttpError } from "./errors.js";
 import { priceCoverage, priceFor } from "./job-prices.js";
 import { screenCandidates } from "./screen.js";
@@ -88,19 +89,20 @@ function scoredSubniche(subniche, relativeDemand) {
 
 export function suggestSubniches(keyword) {
   const text = String(keyword || "").trim();
-  const known = text.toLowerCase().includes("plumb");
   if (!text || text.length < 2) {
     throw new HttpError(400, "invalid_input", "Enter a service keyword of at least 2 characters.");
   }
+  const ranked = rankByQuery(text, PLUMBING_SUBNICHES.map((item) => scoredSubniche(item, item.example_strength)));
+  const known = text.toLowerCase().includes("plumb") || ranked.some((item) => item.match.tier !== "none");
   if (known) {
     return {
       known_profile: true,
       profile_id: "plumbing",
       ranking_kind: "example_suggestion",
       row_count: PLUMBING_SUBNICHES.length,
-      ranking_note: "Twenty plumbing rows sorted by composite band: green (60 or higher), then yellow, then red. Inside a band, the higher composite is first. Demand and competition are example fixtures. Job prices are national published ranges and are not adjusted for a city. A missing price withholds that row's composite.",
+      ranking_note: "Rows sort by how specifically the query matches the sub-niche, then by composite band: green (60 or higher), then yellow, then red. Inside a band, the higher composite is first. Plumbing, plumber, and near me add no specificity. Demand and competition are example fixtures. Job prices are national published ranges and are not adjusted for a city. A missing price withholds that row's composite. Matching does not change the composite.",
       price_coverage: priceCoverage(PLUMBING_SUBNICHES.map((item) => item.id)),
-      subniches: PLUMBING_SUBNICHES.map((item) => scoredSubniche(item, item.example_strength)).sort(compareScoredRows).map((item, index) => ({ ...item, example_rank: index + 1 })),
+      subniches: ranked.map((item, index) => ({ ...item, example_rank: index + 1 })),
       unranked_option: null
     };
   }
