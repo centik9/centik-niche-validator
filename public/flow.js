@@ -81,6 +81,24 @@ function strengthBar(score, band) {
   return bar;
 }
 
+function priceLine(choice) {
+  const missing = !choice.price || (choice.price.status !== "published");
+  if (missing) {
+    return el("p", { class: "leader-evidence" }, [choice.price && choice.price.sentence ? choice.price.sentence : "Price range missing. Margin is missing, so this row is not scored."]);
+  }
+  const line = el("p", { class: "leader-evidence" }, []);
+  if (choice.price.estimated) line.append(el("span", { class: "est-tag" }, ["est."]), " ");
+  line.append(`${choice.price.sentence} National range, not adjusted for a city.`);
+  return line;
+}
+
+function estimateBar(score, band) {
+  const width = score === null || score === undefined ? 0 : Math.max(0, Math.min(100, Number(score)));
+  const track = el("div", { class: `estimate-bar band-${band || "missing"}` });
+  track.append(el("span", { style: `width: ${width}%` }));
+  return track;
+}
+
 function sourceLine(price) {
   if (!price || price.status !== "published") {
     return el("p", { class: "source-line" }, [price && price.source_line ? price.source_line : "Price range missing"]);
@@ -138,11 +156,10 @@ function showSubniches(report, error) {
             choice.composite.status === "calculated" ? choice.composite.composite_display : "Price range missing"
           ])
         ]),
-        strengthBar(choice.composite.composite_display, choice.composite.band),
+        choice.price && choice.price.estimated ? estimateBar(choice.composite.composite_display, choice.composite.band) : strengthBar(choice.composite.composite_display, choice.composite.band),
         ...(choice.match && choice.match.label ? [el("p", { class: "match-label" }, [choice.match.label])] : []),
-        el("p", { class: "leader-evidence" }, [
-          choice.price.status === "published" ? `${choice.price.sentence} National range, not adjusted for a city.` : "Price range missing. Margin is missing, so this row is not scored."
-        ])
+        priceLine(choice),
+        ...(choice.price && choice.price.chain_text ? [el("p", { class: "chain-line" }, [choice.price.chain_text])] : [])
       ])
     ]);
     row.addEventListener("click", () => chooseSubniche(choice));
@@ -279,21 +296,45 @@ async function chooseLocation(card) {
   }
 }
 
-function gaugePoint(score, radius) {
-  const angle = Math.PI * (1 - score / 100);
-  return [180 + radius * Math.cos(angle), 168 - radius * Math.sin(angle)];
+const GAUGE_CX = 200;
+const GAUGE_CY = 176;
+
+function zoneWord(score) {
+  const value = Number(score);
+  if (value < 15) return "No";
+  if (value < 30) return "Low";
+  if (value < 60) return "Medium";
+  if (value < 80) return "High";
+  return "Max";
 }
 
-function gaugeArc(start, end, color) {
-  const [x1, y1] = gaugePoint(start, 118);
-  const [x2, y2] = gaugePoint(end, 118);
-  return svgEl("path", {
-    d: `M ${x1} ${y1} A 118 118 0 0 0 ${x2} ${y2}`,
-    fill: "none",
-    stroke: color,
-    "stroke-width": "16",
-    "stroke-linecap": "butt"
-  });
+function gaugePoint(score, radius) {
+  const angle = Math.PI * (1 - score / 100);
+  return [GAUGE_CX + radius * Math.cos(angle), GAUGE_CY - radius * Math.sin(angle)];
+}
+
+function wedgePath(start, end, radius) {
+  const [x1, y1] = gaugePoint(start, radius);
+  const [x2, y2] = gaugePoint(end, radius);
+  const large = end - start > 50 ? 1 : 0;
+  return `M ${GAUGE_CX} ${GAUGE_CY} L ${x1} ${y1} A ${radius} ${radius} 0 ${large} 0 ${x2} ${y2} Z`;
+}
+
+function face(score, mood) {
+  const [x, y] = gaugePoint(score, 68);
+  const mouth = {
+    sad: `M ${x - 7} ${y + 6} Q ${x} ${y - 1} ${x + 7} ${y + 6}`,
+    frown: `M ${x - 6} ${y + 5} Q ${x} ${y + 1} ${x + 6} ${y + 5}`,
+    flat: `M ${x - 6} ${y + 4} L ${x + 6} ${y + 4}`,
+    smile: `M ${x - 7} ${y + 2} Q ${x} ${y + 9} ${x + 7} ${y + 2}`,
+    big: `M ${x - 8} ${y + 1} Q ${x} ${y + 12} ${x + 8} ${y + 1}`
+  }[mood];
+  return [
+    svgEl("circle", { cx: x, cy: y, r: 13, fill: "#fffdf8", stroke: "#1a1a1a", "stroke-width": "1.5" }),
+    svgEl("circle", { cx: x - 4, cy: y - 3, r: 1.4, fill: "#1a1a1a" }),
+    svgEl("circle", { cx: x + 4, cy: y - 3, r: 1.4, fill: "#1a1a1a" }),
+    svgEl("path", { d: mouth, fill: "none", stroke: "#1a1a1a", "stroke-width": "1.6", "stroke-linecap": "round" })
+  ];
 }
 
 function svgEl(tag, attrs, children) {
@@ -305,27 +346,63 @@ function svgEl(tag, attrs, children) {
 
 function renderGauge(composite) {
   const calculated = composite.status === "calculated";
+  const score = calculated ? Number(composite.composite_display) : null;
+  const zone = calculated ? zoneWord(score) : "Not calculated";
+  const greenLine = !calculated
+    ? "Clears green: not calculated."
+    : composite.clears_green_label === "on an estimated price"
+      ? "Clears green on an estimated price."
+      : `Clears green: ${composite.clears_green_label}.`;
   const label = calculated
-    ? `Composite ${composite.composite_display} out of 100. ${composite.band} band. Clears green: ${composite.clears_green_label}.`
+    ? `Composite ${composite.composite_display} out of 100. Zone ${zone}. ${greenLine}`
     : "Composite withheld. Price range missing. Clears green: not calculated.";
-  const svg = svgEl("svg", { viewBox: "0 0 360 200", role: "img", "aria-label": label });
-  svg.append(gaugeArc(0, 30, "#b42318"), gaugeArc(30, 60, "#c48a12"), gaugeArc(60, 100, "#1e7a46"));
-  for (let mark = 0; mark <= 100; mark += 10) {
-    const [x1, y1] = gaugePoint(mark, 100);
-    const [x2, y2] = gaugePoint(mark, 128);
-    const [tx, ty] = gaugePoint(mark, 142);
-    svg.append(svgEl("line", { x1, y1, x2, y2, stroke: "#1d1914", "stroke-width": "2" }));
-    svg.append(svgEl("text", { x: tx, y: ty, "text-anchor": "middle", "dominant-baseline": "middle", fill: "#1d1914", "font-size": "12" }, [String(mark)]));
+  const svg = svgEl("svg", { viewBox: "0 0 400 250", role: "img", "aria-label": label });
+  const wedges = [
+    [0, 15, "#c0392b", "sad"],
+    [15, 30, "#e07a2f", "frown"],
+    [30, 60, "#e6c229", "flat"],
+    [60, 80, "#8fb83a", "smile"],
+    [80, 100, "#1e7a46", "big"]
+  ];
+  wedges.forEach(([start, end, color]) => svg.append(svgEl("path", { d: wedgePath(start, end, 108), fill: color })));
+  wedges.forEach(([start, end, , mood]) => face((start + end) / 2, mood).forEach((node) => svg.append(node)));
+  const [ringX, ringY] = gaugePoint(0, 124);
+  const [ringEndX, ringEndY] = gaugePoint(100, 124);
+  svg.append(svgEl("path", {
+    d: `M ${ringX} ${ringY} A 124 124 0 0 1 ${ringEndX} ${ringEndY}`,
+    fill: "none",
+    stroke: "#8d867c",
+    "stroke-width": "10"
+  }));
+  [["No", 7.5], ["Low", 22.5], ["Medium", 45], ["High", 70], ["Max", 90]].forEach(([name, at]) => {
+    const [x, y] = gaugePoint(at, 148);
+    svg.append(svgEl("text", { x, y, "text-anchor": "middle", "dominant-baseline": "middle", fill: "#4e483f", "font-size": "11" }, [name]));
+  });
+  for (let mark = 0; mark <= 100; mark += 5) {
+    const [x1, y1] = gaugePoint(mark, 112);
+    const [x2, y2] = gaugePoint(mark, 120);
+    svg.append(svgEl("line", { x1, y1, x2, y2, stroke: "#1a1a1a", "stroke-width": mark % 50 === 0 ? "2" : "1" }));
+    if (mark === 0 || mark === 50 || mark === 100) {
+      const [tx, ty] = gaugePoint(mark, 103);
+      svg.append(svgEl("text", { x: tx, y: ty, "text-anchor": "middle", "dominant-baseline": "middle", fill: "#1a1a1a", "font-size": "10" }, [String(mark)]));
+    }
   }
   if (calculated) {
-    const [nx, ny] = gaugePoint(Number(composite.composite_display), 92);
-    svg.append(svgEl("line", { x1: "180", y1: "168", x2: nx, y2: ny, stroke: "#1d1914", "stroke-width": "4", "stroke-linecap": "round" }));
+    const angle = Math.PI * (1 - score / 100);
+    const [tipX, tipY] = gaugePoint(score, 100);
+    const base = 8;
+    svg.append(svgEl("polygon", {
+      points: `${GAUGE_CX + base * Math.sin(angle)},${GAUGE_CY + base * Math.cos(angle)} ${GAUGE_CX - base * Math.sin(angle)},${GAUGE_CY - base * Math.cos(angle)} ${tipX},${tipY}`,
+      fill: "#1a1a1a"
+    }));
   }
-  svg.append(svgEl("circle", { cx: "180", cy: "168", r: "6", fill: "#1d1914" }));
+  svg.append(svgEl("circle", { cx: GAUGE_CX, cy: GAUGE_CY, r: 16, fill: "#1a1a1a" }));
+  svg.append(svgEl("circle", { cx: GAUGE_CX, cy: GAUGE_CY, r: 7, fill: "#fffdf8" }));
   const figure = el("figure", { class: "gauge" });
   figure.append(svg);
   figure.append(el("p", { class: "score-number" }, [calculated ? composite.composite_display : "Price range missing"]));
-  figure.append(el("p", { class: "gauge-text" }, [label]));
+  figure.append(el("p", { class: "zone-word" }, [zone]));
+  figure.append(el("p", { class: "gauge-text" }, [greenLine]));
   return figure;
 }
 
@@ -335,17 +412,21 @@ function renderBreakdown(composite) {
   block.append(el("p", { class: "help" }, [composite.normalization.composite]));
   const demand = composite.demand;
   block.append(el("p", {}, [
-    `Demand contribution ${demand.contribution_display === null ? "missing" : demand.contribution_display}. EXAMPLE demand index ${demand.index}. EXAMPLE search volume ${demand.monthly_searches} monthly searches.`
+    demand.contribution_display === null
+      ? "Demand missing."
+      : `Demand ${demand.index} × 40% = ${demand.contribution_display}. EXAMPLE search volume ${demand.monthly_searches} monthly searches.`
   ]));
   const competition = composite.competition;
   block.append(el("p", {}, [
-    `Competition contribution ${competition.contribution_display === null ? "missing" : competition.contribution_display}. EXAMPLE competitor count ${competition.competitor_count}. EXAMPLE competition index ${competition.index}. Less competition scores higher.`
+    competition.contribution_display === null
+      ? "Competition missing."
+      : `Competition ${competition.index} × 30% = ${competition.contribution_display}. EXAMPLE competitor count ${competition.competitor_count}. Less competition scores higher.`
   ]));
   const margin = composite.margin;
   block.append(el("p", {}, [
     margin.status === "published"
-      ? `Margin contribution ${margin.contribution_display}. ${margin.sentence} National range, not adjusted for a city.`
-      : "Margin contribution missing. Price range missing. Missing is not scored as zero."
+      ? `Margin ${margin.index} × 30% = ${margin.contribution_display}. ${margin.sentence} National range, not adjusted for a city.`
+      : "Margin missing. Price range missing. Missing is not scored as zero."
   ]));
   if (margin.status === "published") block.append(sourceLine(margin));
   block.append(el("p", { class: "help" }, [composite.normalization.margin]));
@@ -356,6 +437,9 @@ function renderProposal(proposal) {
   const slot = $("proposal-slot");
   slot.replaceChildren();
   slot.append(renderGauge(proposal.composite));
+  if (proposal.deep_check_gate && proposal.deep_check_gate.demand_basis_note) {
+    slot.append(el("p", { class: "help" }, [proposal.deep_check_gate.demand_basis_note]));
+  }
   slot.append(renderBreakdown(proposal.composite));
   const card = el("article", { class: "proposal-card" });
   card.append(el("p", { class: "tag tag-example" }, ["Suggestion only"]));
@@ -384,7 +468,9 @@ function decide(choice) {
   if (choice === "no") {
     state.step = "locations";
     $("step-deep").hidden = true;
-    $("proposal-slot").append(el("p", {}, ["Sketch set aside. Choose another location above. Nothing was bought or checked."]));
+    if (!$("proposal-slot").querySelector("[data-set-aside]")) {
+      $("proposal-slot").append(el("p", { "data-set-aside": "true" }, ["Sketch set aside. Choose another location above. Nothing was bought or checked."]));
+    }
     paintStepper();
     $("step-locations").scrollIntoView({ behavior: "smooth", block: "start" });
     return;

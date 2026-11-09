@@ -105,16 +105,22 @@ export function scoreExampleMarket({ exampleRelativeDemand, exampleMonthlySearch
   }
   const tenths = demandIndex * 4 + competition * 3 + margin * 3;
   const value = tenths / 10;
-  const band = bandForComposite(value);
+  const scoreBand = bandForComposite(value);
+  const estimated = price.estimated === true || price.kind === "derived" || price.kind === "borrowed";
+  const band = estimated && scoreBand === "green" ? "yellow" : scoreBand;
+  const clears = value >= GREEN_MIN;
   return {
     ...base,
     status: "calculated",
     withheld_reason: null,
     composite_tenths: tenths,
     composite_display: formatTenths(tenths),
+    score_band: scoreBand,
     band,
-    clears_green: value >= GREEN_MIN,
-    clears_green_label: value >= GREEN_MIN ? "yes" : "no"
+    estimated,
+    estimate_capped: estimated && scoreBand === "green",
+    clears_green: clears,
+    clears_green_label: estimated && clears ? "on an estimated price" : (clears ? "yes" : "no")
   };
 }
 

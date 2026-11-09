@@ -1,4 +1,5 @@
 import { scoreExampleMarket } from "./composite-score.js";
+import { priceForServiceNiche } from "./niche-prices.js";
 import { rankByQuery } from "./query-match.js";
 import { HttpError } from "./errors.js";
 import { priceCoverage, priceFor } from "./job-prices.js";
@@ -52,6 +53,39 @@ const LOCATIONS = [
   { id: "fulton-county-ga", geography_type: "county", name: "Fulton County", state: "Georgia", base: 67, example_deep_check: false }
 ];
 
+const SERVICE_NICHES = [
+  ["plumbing", "Plumbing", 96],
+  ["hvac", "HVAC repair", 80],
+  ["locksmith", "Locksmith", 72],
+  ["garage-door", "Garage door repair", 64],
+  ["electrician", "Electrician", 90],
+  ["retaining-wall", "Retaining wall repair", 48],
+  ["mobile-welding", "Mobile welding", 40],
+  ["crawl-space", "Crawl space encapsulation", 32]
+];
+
+const TRADE_PATTERN = /hvac|furnace|heat pump|air conditioning|\bac\b|locksmith|lockout|rekey|garage door|electrician|electrical|retaining|weld|crawl/;
+
+function serviceRows(keyword) {
+  const rows = SERVICE_NICHES.map(([id, label, exampleStrength]) => {
+    const price = priceForServiceNiche(id);
+    const scored = scoredSubniche({
+      id,
+      label,
+      example_strength: exampleStrength,
+      evidence: "Example demand index for this trade. Not a measured search volume.",
+      note: "Demand and competition are example fixtures."
+    }, exampleStrength);
+    return { ...scored, price, composite: scoreExampleMarket({
+      exampleRelativeDemand: exampleStrength,
+      exampleMonthlySearches: exampleStrength * 12,
+      exampleCompetitorCount: Math.max(3, Math.round(28 - exampleStrength / 4)),
+      price
+    }) };
+  });
+  return rankByQuery(keyword, rows).map((item, index) => ({ ...item, example_rank: index + 1 }));
+}
+
 const SHIFTS = {
   "emergency-plumbing": { "austin-tx": 8, "new-york-ny": -6, "portland-me": -4 },
   "drain-cleaning": { "springfield-il": 28, "austin-tx": -18, "houston-tx": 6 },
@@ -93,7 +127,26 @@ export function suggestSubniches(keyword) {
     throw new HttpError(400, "invalid_input", "Enter a service keyword of at least 2 characters.");
   }
   const ranked = rankByQuery(text, PLUMBING_SUBNICHES.map((item) => scoredSubniche(item, item.example_strength)));
-  const known = text.toLowerCase().includes("plumb") || ranked.some((item) => item.match.tier !== "none");
+  const tradeQuery = TRADE_PATTERN.test(text.toLowerCase());
+  const known = text.toLowerCase().includes("plumb") || (!tradeQuery && ranked.some((item) => item.match.tier !== "none"));
+  if (!known && tradeQuery) {
+    const subniches = serviceRows(text);
+    return {
+      known_profile: true,
+      profile_id: "service-trades",
+      ranking_kind: "example_suggestion",
+      row_count: subniches.length,
+      ranking_note: "These trades use reviewed national prices. An estimate is tagged est. and cannot be shown as a green row. Demand and competition are still example fixtures.",
+      price_coverage: {
+        published_count: subniches.filter((item) => item.price.status === "published").length,
+        missing_count: subniches.filter((item) => item.price.status !== "published").length,
+        missing_ids: subniches.filter((item) => item.price.status !== "published").map((item) => item.id),
+        note: "Retaining wall repair, mobile welding, and crawl space encapsulation have no usable emergency price. No estimate was made for them."
+      },
+      subniches,
+      unranked_option: null
+    };
+  }
   if (known) {
     return {
       known_profile: true,
@@ -307,7 +360,7 @@ export function buildProposal(body) {
   const location = LOCATIONS.find((item) => item.id === body.location_id);
   if (!location) throw new HttpError(400, "inconsistent_choice", "That location is not in the example shortlist.");
   const demand = demandFor(location, subniche.id, suggestion.ranking_kind);
-  const price = priceFor(subniche.id);
+  const price = subniche.price || priceFor(subniche.id);
   const composite = scoreExampleMarket({
     exampleRelativeDemand: demand.exampleRelativeDemand,
     exampleMonthlySearches: demand.exampleMonthlySearches,
@@ -346,7 +399,8 @@ export function buildProposal(body) {
     deep_check_gate: {
       paid_calls_allowed: false,
       clears_green: composite.clears_green_label,
-      gate_line: `Clears green: ${composite.clears_green_label}. Yes does not authorize spending or publishing.`,
+      gate_line: `${composite.clears_green_label === "on an estimated price" ? "Clears green on an estimated price." : `Clears green: ${composite.clears_green_label}.`} Yes does not authorize spending or publishing.`,
+      demand_basis_note: "The leaderboard uses a national example demand. This gauge uses the example demand for the city you picked. Those two numbers can differ, so the gauge can sit in a different band than the row.",
       example_check_available: location.example_deep_check && location.geography_type === "city",
       reason: location.geography_type === "city"
         ? (location.example_deep_check

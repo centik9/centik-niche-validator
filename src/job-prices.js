@@ -57,7 +57,7 @@ export function priceFor(subnicheId) {
     scope: PRICE_SCOPE,
     accessed: PRICE_ACCESS_DATE,
     sentence: `${row.job_label} runs ${formatDollars(row.low_dollars)}–${formatDollars(row.high_dollars)} ${unit}.`,
-    source_line: `${row.source_name}. Accessed November 8, 2026. ${row.url}`,
+    source_line: `${row.source_name}. Accessed November 8, 2026. ${row.url}${row.snippet_only ? " Snippet only: the page returned HTTP 403, so this sentence was not re-read from the live page." : ""}`,
     stale: isStale(row.read_date, "2026-11-09"),
     note: "National United States range from the cited page. Not adjusted for a city."
   };
