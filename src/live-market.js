@@ -7,10 +7,12 @@ function measured(field) {
   return field && (field.status === "measured" || field.status === "measured_zero") && Number.isInteger(field.value);
 }
 
+export const LISTING_ROOM_CAP = 100;
+
 export function liveCompetitionIndex({ listings, withoutWebsite, averageReviews }) {
   if (!Number.isInteger(listings) || listings < 0) return null;
-  const capped = Math.min(listings, 30);
-  const room = Math.round((100 * (30 - capped)) / 30);
+  const capped = Math.min(listings, LISTING_ROOM_CAP);
+  const room = Math.round((100 * (LISTING_ROOM_CAP - capped)) / LISTING_ROOM_CAP);
   const noSite = listings === 0 ? 0 : Math.round((100 * Math.min(withoutWebsite || 0, listings)) / listings);
   const pressure = Math.round(Math.min(100, Math.max(0, averageReviews || 0)));
   return Math.max(0, Math.min(100, Math.round((0.5 * room) + (0.3 * noSite) + (0.2 * (100 - pressure)))));
@@ -49,6 +51,6 @@ export function cityMarketFromReports(demand, maps, origin) {
     unique_listings: listings,
     listings_without_website: listings === null ? null : withoutWebsite,
     average_reviews: listings === null ? null : Math.round(averageReviews),
-    formula: "Live competition index = round(0.5 × listing room + 0.3 × share with no website + 0.2 × (100 − review pressure)). Listing room uses the real deduped Maps count, capped at 30, instead of max(3, round(28 − demand / 4))."
+    formula: "Live competition index = round(0.5 × listing room + 0.3 × share with no website + 0.2 × (100 − review pressure)). Listing room is round(100 × (100 − min(unique organic listings, 100)) / 100), so 40 listings scores differently from 90. It does not use max(3, round(28 − demand / 4))."
   };
 }

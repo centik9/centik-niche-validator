@@ -68,7 +68,7 @@ test("health, static page, and example validation stay local", async () => {
     const report = await resolveAndValidate(port, "emergency plumber");
     assert.equal(report.status, 200);
     assert.equal(report.body.data_origin, "example");
-    assert.equal(report.body.score.overall_display, "62.8");
+    assert.equal(report.body.score.overall_display, "79.6");
     assert.match(report.body.example_banner, /Not a real market measurement/);
     assert.equal(fetches, 0);
   });

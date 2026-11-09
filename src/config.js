@@ -2,7 +2,7 @@ export const SERVICE_NAME = "centik-niche-validator";
 export const VERSION = "0.1.0";
 export const HOST = "0.0.0.0";
 
-export const MAPS_DEPTH = 20;
+export const MAPS_DEPTH = 100;
 export const LANGUAGE_CODE = "en";
 export const MAPS_DEVICE = "desktop";
 export const MAPS_OS = "windows";

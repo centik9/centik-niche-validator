@@ -59,7 +59,7 @@ test("confirmation uses the product-specific code, ignoring a client country cod
   assert.equal(maps.body[0].location_code, resolution.google_maps.match.location_code);
   assert.notEqual(volume.body[0].location_code, maps.body[0].location_code);
   assert.equal(volume.body[0].search_partners, false);
-  assert.equal(maps.body[0].depth, 20);
+  assert.equal(maps.body[0].depth, 100);
   assert.equal(maps.body[0].search_this_area, true);
   assert.equal(report.normalized_query.state_normalized, "texas");
   assert.equal(report.generated_at, "2026-01-15T00:00:00.000Z");

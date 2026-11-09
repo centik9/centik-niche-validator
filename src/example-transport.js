@@ -144,14 +144,14 @@ function mapsResult(kind, keyword, locationCode) {
   }
   if (kind === "saturated") {
     const items = [];
-    for (let n = 1; n <= 20; n += 1) items.push(organic(n, "Austin"));
+    for (let n = 1; n <= 100; n += 1) items.push(organic(n, "Austin"));
     return [{
       keyword,
       type: "maps",
       location_code: locationCode,
       language_code: "en",
       se_results_count: 1000,
-      items_count: 20,
+      items_count: 100,
       items
     }];
   }
