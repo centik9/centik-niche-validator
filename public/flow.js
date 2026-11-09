@@ -318,12 +318,11 @@ function annularWedge(start, end, outer, inner) {
   const [ox2, oy2] = gaugePoint(end, outer);
   const [ix2, iy2] = gaugePoint(end, inner);
   const [ix1, iy1] = gaugePoint(start, inner);
-  const large = end - start > 50 ? 1 : 0;
-  return `M ${ox1} ${oy1} A ${outer} ${outer} 0 ${large} 0 ${ox2} ${oy2} L ${ix2} ${iy2} A ${inner} ${inner} 0 ${large} 1 ${ix1} ${iy1} Z`;
+  return `M ${ox1} ${oy1} A ${outer} ${outer} 0 0 1 ${ox2} ${oy2} L ${ix2} ${iy2} A ${inner} ${inner} 0 0 0 ${ix1} ${iy1} Z`;
 }
 
 function face(score, mood) {
-  const [x, y] = gaugePoint(score, 84);
+  const [x, y] = gaugePoint(score, 90);
   const mouth = {
     sad: `M ${x - 7} ${y + 6} Q ${x} ${y - 1} ${x + 7} ${y + 6}`,
     frown: `M ${x - 6} ${y + 5} Q ${x} ${y + 1} ${x + 6} ${y + 5}`,
@@ -360,7 +359,7 @@ function renderGauge(composite) {
   const label = calculated
     ? `Composite ${composite.composite_display} out of 100. Zone ${zone}. ${pillText}.`
     : "Composite withheld. Price range missing. Not scored.";
-  const svg = svgEl("svg", { viewBox: "0 0 400 252", role: "img", "aria-label": label });
+  const svg = svgEl("svg", { viewBox: "0 0 400 268", role: "img", "aria-label": label });
   const wedges = [
     [0, 15, "#c0392b", "sad"],
     [15, 30, "#e07a2f", "frown"],
@@ -369,39 +368,39 @@ function renderGauge(composite) {
     [80, 100, "#1e7a46", "big"]
   ];
   wedges.forEach(([start, end, color]) => {
-    svg.append(svgEl("path", { d: annularWedge(start, end, 112, 58), fill: color, stroke: "none" }));
+    svg.append(svgEl("path", { d: annularWedge(start, end, 116, 62), fill: color, stroke: "none" }));
   });
   [0, 15, 30, 60, 80, 100].forEach((boundary) => {
-    const [x1, y1] = gaugePoint(boundary, 58);
-    const [x2, y2] = gaugePoint(boundary, 112);
+    const [x1, y1] = gaugePoint(boundary, 62);
+    const [x2, y2] = gaugePoint(boundary, 116);
     svg.append(svgEl("line", { x1, y1, x2, y2, stroke: "#fffdf8", "stroke-width": "3" }));
   });
   wedges.forEach(([start, end, , mood]) => face((start + end) / 2, mood).forEach((node) => svg.append(node)));
-  const [ringX, ringY] = gaugePoint(0, 124);
-  const [ringEndX, ringEndY] = gaugePoint(100, 124);
+  const [ringX, ringY] = gaugePoint(0, 128);
+  const [ringEndX, ringEndY] = gaugePoint(100, 128);
   svg.append(svgEl("path", {
-    d: `M ${ringX} ${ringY} A 124 124 0 0 1 ${ringEndX} ${ringEndY}`,
+    d: `M ${ringX} ${ringY} A 128 128 0 0 1 ${ringEndX} ${ringEndY}`,
     fill: "none",
     stroke: "#b7b1a8",
-    "stroke-width": "14",
+    "stroke-width": "12",
     "stroke-linecap": "butt"
   }));
   [["No", 7.5], ["Low", 22.5], ["Medium", 45], ["High", 70], ["Max", 90]].forEach(([name, at]) => {
-    const [x, y] = gaugePoint(at, 148);
+    const [x, y] = gaugePoint(at, 150);
     svg.append(svgEl("text", { x, y, "text-anchor": "middle", "dominant-baseline": "middle", fill: "#4e483f", "font-size": "11" }, [name]));
   });
   for (let mark = 0; mark <= 100; mark += 5) {
-    const [x1, y1] = gaugePoint(mark, 112);
-    const [x2, y2] = gaugePoint(mark, 120);
+    const [x1, y1] = gaugePoint(mark, 117);
+    const [x2, y2] = gaugePoint(mark, 122);
     svg.append(svgEl("line", { x1, y1, x2, y2, stroke: "#1a1a1a", "stroke-width": mark % 50 === 0 ? "2" : "1" }));
     if (mark === 0 || mark === 50 || mark === 100) {
-      const [tx, ty] = gaugePoint(mark, 103);
-      svg.append(svgEl("text", { x: tx, y: ty, "text-anchor": "middle", "dominant-baseline": "middle", fill: "#1a1a1a", "font-size": "10" }, [String(mark)]));
+      const [tx, ty] = gaugePoint(mark, 119);
+      svg.append(svgEl("text", { x: tx, y: ty, "text-anchor": "middle", "dominant-baseline": "middle", fill: "#1d1914", "font-size": "9" }, [String(mark)]));
     }
   }
   if (calculated) {
     const angle = Math.PI * (1 - score / 100);
-    const [tipX, tipY] = gaugePoint(score, 100);
+    const [tipX, tipY] = gaugePoint(score, 108);
     const base = 8;
     svg.append(svgEl("polygon", {
       points: `${GAUGE_CX + base * Math.sin(angle)},${GAUGE_CY + base * Math.cos(angle)} ${GAUGE_CX - base * Math.sin(angle)},${GAUGE_CY - base * Math.cos(angle)} ${tipX},${tipY}`,
@@ -412,7 +411,7 @@ function renderGauge(composite) {
   svg.append(svgEl("circle", { cx: GAUGE_CX, cy: GAUGE_CY, r: 8, fill: "#fffdf8" }));
   svg.append(svgEl("text", {
     x: GAUGE_CX,
-    y: GAUGE_CY + 40,
+    y: GAUGE_CY + 58,
     "text-anchor": "middle",
     "font-family": "Segoe UI, system-ui, sans-serif",
     "font-size": "32",
@@ -421,7 +420,7 @@ function renderGauge(composite) {
   }, [calculated ? composite.composite_display : "—"]));
   svg.append(svgEl("text", {
     x: GAUGE_CX,
-    y: GAUGE_CY + 62,
+    y: GAUGE_CY + 80,
     "text-anchor": "middle",
     "font-family": "Segoe UI, system-ui, sans-serif",
     "font-size": "16",
