@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign in — Centik Niche Validator</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main class="panel">
+    <p class="mark">Centik</p>
+    <h1>Team sign in</h1>
+    <p class="help">Use the team email and access code. This page does not store a password in the browser.</p>
+    <form id="login-form">
+      <label class="field wide"><span>Email</span><input id="email" type="email" autocomplete="username" required maxlength="120"></label>
+      <label class="field wide"><span>Access code</span><input id="access-code" type="password" autocomplete="current-password" required maxlength="200"></label>
+      <div class="actions"><button type="submit">Sign in</button></div>
+      <p id="login-status" class="help" role="status"></p>
+    </form>
+  </main>
+  <script src="/login.js"></script>
+</body>
+</html>

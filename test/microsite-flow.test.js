@@ -8,7 +8,7 @@ import {
   reduceFlow,
   suggestSubniches
 } from "../src/microsite-flow.js";
-import { postJson, withServer } from "./helpers.js";
+import { postJson, sessionCookie, TEST_AUTH, withServer } from "./helpers.js";
 
 const context = { keyword: "plumbing" };
 
@@ -149,11 +149,11 @@ test("a proposal must match the keyword and does not authorize spending", () => 
 test("the preview route stays on example data", async () => {
   let fetches = 0;
   const app = createApp({
-    env: { DATAFORSEO_LIVE: "false" },
+    env: { ...TEST_AUTH, DATAFORSEO_LIVE: "false" },
     fetchImpl: async () => { fetches += 1; throw new Error("network"); }
   });
   await withServer(app, async (port) => {
-    const page = await fetch(`http://127.0.0.1:${port}/`);
+    const page = await fetch(`http://127.0.0.1:${port}/`, { headers: { cookie: await sessionCookie(port) } });
     const html = await page.text();
     assert.match(html, /id="keyword"/);
     assert.equal(html.includes('id="city"'), false);

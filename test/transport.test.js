@@ -32,7 +32,8 @@ function mapsBody(extra = {}) {
 
 test("refuses billable shapes that would widen or enlarge the query", () => {
   assert.doesNotThrow(() => assertSafeRequest({ method: "POST", path: SEARCH_VOLUME_PATH, body: volumeBody() }));
-  assert.throws(() => assertSafeRequest({ method: "POST", path: MAPS_PATH, body: mapsBody({ depth: 100 }) }), /depth/);
+  assert.doesNotThrow(() => assertSafeRequest({ method: "POST", path: MAPS_PATH, body: mapsBody({ depth: 100 }) }));
+  assert.throws(() => assertSafeRequest({ method: "POST", path: MAPS_PATH, body: mapsBody({ depth: 101 }) }), /depth/);
   assert.throws(() => assertSafeRequest({ method: "POST", path: MAPS_PATH, body: mapsBody({ depth: undefined }) }), /depth/);
   assert.throws(() => assertSafeRequest({ method: "POST", path: SEARCH_VOLUME_PATH, body: volumeBody({ location_name: "United States" }) }), /location_name/);
   assert.throws(() => assertSafeRequest({ method: "POST", path: SEARCH_VOLUME_PATH, body: volumeBody({ location_coordinate: "30,-97" }) }), /coordinates/);

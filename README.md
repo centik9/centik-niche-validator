@@ -123,16 +123,28 @@ Copy the names from `.env.example`. Put real values in the host environment, not
 
 | Variable | Role |
 | --- | --- |
-| `DATAFORSEO_LOGIN` | DataForSEO API login. Placeholder in `.env.example` only. |
-| `DATAFORSEO_PASSWORD` | DataForSEO API password. Placeholder in `.env.example` only. |
+| `DATAFORSEO_LOGIN` | DataForSEO API login. Required only when live mode is on. Never put the real value in git or in a client file. |
+| `DATAFORSEO_PASSWORD` | DataForSEO API password. Same rule as the login. |
 | `DATAFORSEO_LIVE` | Must be the exact string `true` to allow live calls. `TRUE`, `1`, and `yes` leave live mode off. |
-| `PORT` | Optional listen port. Defaults to 3000. |
+| `BUDGET_USD_TOTAL` | Hard ceiling for paid calls in this process, in USD. Default `10`. A query that would pass it is refused before the request is sent. |
+| `BUDGET_USD_DAILY` | Per-day ceiling in USD. Default `5`. The day is the UTC date on the ledger timestamp. |
+| `DATA_DIR` | Directory for `spend-ledger.json` and `result-cache.json`. If it is missing or not writable, the guard keeps both in memory for this process only. On Render, `/tmp/centik-data` is used and is wiped on restart. |
+| `ALLOWED_EMAILS` | Comma-separated emails that may sign in. Default `team@centik.ai`. |
+| `TEAM_ACCESS_CODE` | Shared access code. There is no default. Sign-in returns 503 until this and `SESSION_SECRET` are set. |
+| `SESSION_SECRET` | HMAC key for the session cookie. There is no default. |
+| `PORT` | Optional listen port. Defaults to 3000. Render sets this. The process binds `0.0.0.0`. |
 
 There is no `.env` loader. A file named `.env` is gitignored so it is not committed; this process does not read it. Inject the variables in the shell or the host.
 
-Live calls use HTTP Basic auth and are not retried. The transport refuses any endpoint other than the two uncharged location lists, the search-volume live call, and the Maps live call. It refuses `location_name`, `location_coordinate`, custom date ranges, more than one keyword, `search_partners: true`, and any Maps depth other than 20. Request bodies that contain the login or password are refused before send. Logs and error responses pass through a redactor for those values and for `Authorization: Basic` tokens.
+Live calls use HTTP Basic auth and are not retried. The transport refuses any endpoint other than the two uncharged location lists, the search-volume live call, and the Maps live call. It refuses `location_name`, `location_coordinate`, custom date ranges, more than one keyword, `search_partners: true`, and any Maps depth other than 20 (example) or 100 (live). Request bodies that contain the login or password are refused before send. Logs and error responses pass through a redactor for those values and for `Authorization: Basic` tokens.
 
-Location lists are cached in process memory for six hours. The cache is lost on restart. Nothing is written to disk.
+Location lists are cached in process memory for six hours. The cache is lost on restart. Those GET requests are not charged and are not written to the spend ledger.
+
+A live check is about $0.09 for Google Ads search volume plus $0.002 for Maps, $0.092 together. The same niche, location code, and endpoint is served from a 7-day cache and is not paid again. `GET /api/spend` returns the ledger totals and requires the team session.
+
+## Team access
+
+Every page and API except `GET /health` and `/login` requires a session. The sign-in page asks for an email and an access code. The email must be in `ALLOWED_EMAILS`. The code is compared with `TEAM_ACCESS_CODE` by hashing both sides and using a constant-time compare. A match sets an HttpOnly, Secure, SameSite=Lax cookie named `centik_session`, signed with `SESSION_SECRET`, for 30 days. Login attempts are limited to 8 per 15 minutes per IP. The access code and the DataForSEO credentials are not in the client files.
 
 ## How demand and Maps are read
 
@@ -142,7 +154,7 @@ Search volume requests send one keyword, `language_code` `en`, `search_partners`
 
 CPC and the low/high top-of-page bids are Google Ads USD statistics. They are excluded from the index.
 
-Maps requests send the same keyword, `language_code` `en`, the confirmed Maps `location_code`, `depth` 20, `device` `desktop`, `os` `windows`, and `search_this_area` `true`. `search_this_area: false` can pull listings from outside the displayed area, so it is not used.
+Maps requests send the same keyword, `language_code` `en`, the confirmed Maps `location_code`, `device` `desktop`, `os` `windows`, and `search_this_area` `true`. Example mode uses depth 20. Live mode uses depth 100. `search_this_area: false` can pull listings from outside the displayed area, so it is not used.
 
 Organic `maps_search` rows are deduplicated by `place_id`, then `cid`, then normalized title plus address. `maps_paid_item` rows and `is_directory_item: true` rows are excluded from the organic count. Listings whose `address_info.city` differs from the query city stay in the sample and are counted; they are not silently dropped. DataForSEO documents `address_info.region` as a DMA region, so it is not used as a state filter.
 
@@ -229,22 +241,32 @@ Example location coverage is a small gazetteer: several Springfields, both Portl
 
 `npm test` runs `node --test`. The suite uses an injected transport. It does not call DataForSEO.
 
-## Later Render deployment
+## Render
 
-Not deployed from this version. When it is deployed as a web service:
+`render.yaml` defines one Node web service, plan `free`.
 
-- Bind is already `0.0.0.0:$PORT`.
-- Use `GET /health` as the health check.
-- Set `DATAFORSEO_LOGIN`, `DATAFORSEO_PASSWORD`, and, only when a live check is intended, `DATAFORSEO_LIVE=true` in the Render environment. Do not commit them.
-- The filesystem is ephemeral. This app does not store reports on disk.
-- Run one web service for this app. Free web services spin down after inactivity.
+- Build command: `npm install`
+- Start command: `npm start` (`node src/server.js`)
+- Health check: `GET /health`
+- Bind is `0.0.0.0:$PORT`. Render sets `PORT`.
+- `DATAFORSEO_LOGIN`, `DATAFORSEO_PASSWORD`, `TEAM_ACCESS_CODE`, and `SESSION_SECRET` are `sync: false` with no value in the file. Set them in the Dashboard. Do not commit them.
+- `DATAFORSEO_LIVE`, `BUDGET_USD_TOTAL`, `BUDGET_USD_DAILY`, `DATA_DIR`, and `ALLOWED_EMAILS` are also `sync: false`, with safe defaults (`false`, `10`, `5`, `/tmp/centik-data`, `team@centik.ai`).
+- The Render filesystem is ephemeral. The spend ledger under `DATA_DIR` does not survive a restart or spin-down. Free web services spin down after inactivity.
+
+## One cheap live check
+
+Do this once, after the secrets are set, and not from a test:
+
+1. Set `DATAFORSEO_LIVE=true`, `DATAFORSEO_LOGIN`, `DATAFORSEO_PASSWORD`, `TEAM_ACCESS_CODE`, and `SESSION_SECRET`. Leave the budgets at the defaults.
+2. Sign in at `/login`.
+3. Run one live check for one keyword in one confirmed city.
+4. Expect one Google Ads call and one Maps call. `GET /api/spend` with the session cookie should show about $0.092.
+5. Run that same keyword and city again. The 7-day cache should answer it and the spend total should stay the same.
+
+Location-list lookups are free and cached. They are not part of the $0.092.
 
 ## Pending
 
-These are not done in this version:
-
-- Runtime secret configuration. Credentials stay on the operator's machine and are not in this repository.
-- A live integration check against DataForSEO. No paid or uncharged provider call was made while building this version.
-- Deployment, including Render.
+A live call against DataForSEO was not made in this repository. Tests use mocks and the example fixtures. Deployment is left to the operator.
 
 No license is included.

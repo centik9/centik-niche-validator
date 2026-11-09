@@ -3,7 +3,7 @@ import test from "node:test";
 import { createApp } from "../src/app.js";
 import { HOST, VERSION } from "../src/config.js";
 import { createExampleTransport } from "../src/example-transport.js";
-import { postJson, withServer } from "./helpers.js";
+import { postJson, sessionCookie, TEST_AUTH, withServer } from "./helpers.js";
 
 async function resolveAndValidate(port, niche, place = { city: "Austin", state: "Texas", country: "United States" }, mode = "example") {
   const resolved = await postJson(port, "/api/resolve", { ...place, mode });
@@ -29,7 +29,7 @@ test("health, static page, and example validation stay local", async () => {
   assert.equal(HOST, "0.0.0.0");
   let fetches = 0;
   const app = createApp({
-    env: {},
+    env: { ...TEST_AUTH, },
     fetchImpl: async () => {
       fetches += 1;
       throw new Error("network");
@@ -46,14 +46,16 @@ test("health, static page, and example validation stay local", async () => {
     assert.equal(healthBody.credentials_configured, false);
     const head = await fetch(`http://127.0.0.1:${port}/health`, { method: "HEAD" });
     assert.equal(head.status, 200);
-    const page = await fetch(`http://127.0.0.1:${port}/`);
+    const page = await fetch(`http://127.0.0.1:${port}/`, { headers: { cookie: await sessionCookie(port) } });
     const html = await page.text();
     assert.match(html, /id="keyword"/);
     assert.equal(html.includes('id="city"'), false);
     assert.match(html, /Example data only/);
     const favicon = await fetch(`http://127.0.0.1:${port}/favicon.ico`);
     assert.equal(favicon.status, 204);
-    const missing = await fetch(`http://127.0.0.1:${port}/nope`);
+    const locked = await fetch(`http://127.0.0.1:${port}/nope`, { redirect: "manual" });
+    assert.equal(locked.status, 302);
+    const missing = await fetch(`http://127.0.0.1:${port}/nope`, { headers: { cookie: await sessionCookie(port) } });
     assert.equal(missing.status, 404);
     const report = await resolveAndValidate(port, "emergency plumber");
     assert.equal(report.status, 200);
@@ -67,7 +69,7 @@ test("health, static page, and example validation stay local", async () => {
 test("live mode is exact and does not substitute example data", async () => {
   let fetches = 0;
   const off = createApp({
-    env: { DATAFORSEO_LIVE: "TRUE", DATAFORSEO_LOGIN: "login-user", DATAFORSEO_PASSWORD: "test-password-value" },
+    env: { ...TEST_AUTH,  DATAFORSEO_LIVE: "TRUE", DATAFORSEO_LOGIN: "login-user", DATAFORSEO_PASSWORD: "test-password-value" },
     fetchImpl: async () => { fetches += 1; throw new Error("network"); }
   });
   await withServer(off, async (port) => {
@@ -80,7 +82,7 @@ test("live mode is exact and does not substitute example data", async () => {
   });
 
   const missingCreds = createApp({
-    env: { DATAFORSEO_LIVE: "true" },
+    env: { ...TEST_AUTH,  DATAFORSEO_LIVE: "true" },
     fetchImpl: async () => { fetches += 1; throw new Error("network"); }
   });
   await withServer(missingCreds, async (port) => {
@@ -101,7 +103,7 @@ test("live mode is exact and does not substitute example data", async () => {
 test("opted-in example requests still do not touch the network", async () => {
   let fetches = 0;
   const app = createApp({
-    env: { DATAFORSEO_LIVE: "true", DATAFORSEO_LOGIN: "login-user", DATAFORSEO_PASSWORD: "test-password-value" },
+    env: { ...TEST_AUTH,  DATAFORSEO_LIVE: "true", DATAFORSEO_LOGIN: "login-user", DATAFORSEO_PASSWORD: "test-password-value" },
     fetchImpl: async () => { fetches += 1; throw new Error("network"); }
   });
   await withServer(app, async (port) => {
@@ -120,7 +122,7 @@ test("live opt-in uses the injected transport and product-specific codes", async
   const calls = [];
   const base = createExampleTransport();
   const app = createApp({
-    env: { DATAFORSEO_LIVE: "true", DATAFORSEO_LOGIN: "login-user", DATAFORSEO_PASSWORD: "test-password-value" },
+    env: { ...TEST_AUTH,  DATAFORSEO_LIVE: "true", DATAFORSEO_LOGIN: "login-user", DATAFORSEO_PASSWORD: "test-password-value" },
     liveTransport: {
       async request(args) {
         calls.push(args);
@@ -145,7 +147,7 @@ test("live opt-in uses the injected transport and product-specific codes", async
 
 test("validation, rate limit, and body size failures stay local", async () => {
   const app = createApp({
-    env: {},
+    env: { ...TEST_AUTH, },
     maxBodyBytes: 180,
     rateLimits: { api: { windowMs: 60_000, max: 3 }, live: { windowMs: 60_000, max: 1 }, globalLive: { windowMs: 60_000, max: 1 } },
     now: () => 1_700_000_000_000
@@ -155,7 +157,7 @@ test("validation, rate limit, and body size failures stay local", async () => {
     assert.equal(bad.status, 400);
     const huge = await fetch(`http://127.0.0.1:${port}/api/resolve`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", cookie: await sessionCookie(port) },
       body: JSON.stringify({ city: "Austin", state: "Texas", country: "United States", padding: "x".repeat(400) })
     });
     assert.equal(huge.status, 413);
@@ -172,7 +174,7 @@ test("validation, rate limit, and body size failures stay local", async () => {
 test("unexpected errors are redacted", async () => {
   const logs = [];
   const app = createApp({
-    env: { DATAFORSEO_PASSWORD: "test-password-value", DATAFORSEO_LOGIN: "login-user" },
+    env: { ...TEST_AUTH,  DATAFORSEO_PASSWORD: "test-password-value", DATAFORSEO_LOGIN: "login-user" },
     logger: { error(message) { logs.push(message); } },
     validateImpl: async () => {
       throw new Error("boom test-password-value Authorization: Basic dGVzdA==");
@@ -198,7 +200,7 @@ test("unexpected errors are redacted", async () => {
 });
 
 test("Springfield and Portland stay in the states that were asked for", async () => {
-  const app = createApp({ env: {} });
+  const app = createApp({ env: { ...TEST_AUTH, } });
   await withServer(app, async (port) => {
     const illinois = await (await postJson(port, "/api/resolve", { city: "Springfield", state: "Illinois", country: "United States" })).json();
     const missouri = await (await postJson(port, "/api/resolve", { city: "Springfield", state: "Missouri", country: "United States" })).json();

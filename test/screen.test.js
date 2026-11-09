@@ -3,7 +3,7 @@ import test from "node:test";
 import { createApp } from "../src/app.js";
 import { createExampleTransport } from "../src/example-transport.js";
 import { SCREEN_MODEL_ID, loadExtractCatalog, screenCandidates } from "../src/screen.js";
-import { exampleDeps, postJson, withServer } from "./helpers.js";
+import { exampleDeps, postJson, TEST_AUTH, withServer } from "./helpers.js";
 import { validateNiche } from "../src/validator.js";
 
 const sampleList = [
@@ -164,7 +164,7 @@ test("a county or metro cannot enter the paid deep check", async () => {
 test("HTTP sample screen and county rejection stay local", async () => {
   let fetches = 0;
   const app = createApp({
-    env: { DATAFORSEO_LIVE: "false" },
+    env: { ...TEST_AUTH, DATAFORSEO_LIVE: "false" },
     fetchImpl: async () => { fetches += 1; throw new Error("network"); }
   });
   await withServer(app, async (port) => {

@@ -110,9 +110,19 @@ export function parseValidateInput(raw) {
     ...locationParts(body),
     niche,
     mode: parseMode(body.mode),
+    margin_index: parseMarginIndex(body.margin_index),
+    margin_estimated: body.margin_estimated === true,
     confirmed: {
       google_ads: parseSide(body.confirmed.google_ads, "google_ads"),
       google_maps: parseSide(body.confirmed.google_maps, "google_maps")
     }
   };
+}
+
+function parseMarginIndex(value) {
+  if (value === undefined || value === null || value === "") return null;
+  if (!Number.isInteger(value) || value < 0 || value > 100) {
+    throw new HttpError(400, "invalid_input", "margin_index must be an integer from 0 to 100.");
+  }
+  return value;
 }

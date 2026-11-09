@@ -34,10 +34,31 @@ export async function withServer(app, fn) {
   }
 }
 
-export function postJson(port, pathname, payload) {
-  return fetch(`http://127.0.0.1:${port}${pathname}`, {
+export const TEST_AUTH = {
+  ALLOWED_EMAILS: "team@centik.ai",
+  TEAM_ACCESS_CODE: "test-code-not-a-secret",
+  SESSION_SECRET: "test-session-secret-32chars-minimum"
+};
+
+const sessionJar = new Map();
+
+export async function sessionCookie(port) {
+  if (sessionJar.has(port)) return sessionJar.get(port);
+  const response = await fetch(`http://127.0.0.1:${port}/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload)
+    body: JSON.stringify({ email: "team@centik.ai", access_code: TEST_AUTH.TEAM_ACCESS_CODE })
   });
+  const raw = response.headers.get("set-cookie") || "";
+  const cookie = raw.split(";")[0];
+  sessionJar.set(port, cookie);
+  return cookie;
+}
+
+export function postJson(port, pathname, payload) {
+  return sessionCookie(port).then((cookie) => fetch(`http://127.0.0.1:${port}${pathname}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", cookie },
+    body: JSON.stringify(payload)
+  }));
 }

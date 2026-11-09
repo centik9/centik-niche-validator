@@ -16,6 +16,8 @@ import { parseResolveInput, parseValidateInput } from "./input.js";
 import { STANDING_LIMITATIONS } from "./limitations.js";
 import { combineLocationOutcomes, matchCity } from "./locations.js";
 import { mapsFromError, mapsNotSent, parseMapsPayload } from "./maps.js";
+import { cityMarketFromReports } from "./live-market.js";
+import { scoreFromIndexes } from "./composite-score.js";
 import { buildScore } from "./scoring.js";
 
 const BLOCK_MESSAGE = {
@@ -224,7 +226,7 @@ async function loadMaps(prepared, resolution, deps) {
     keyword: prepared.niche,
     location_code: match.location_code,
     language_code: LANGUAGE_CODE,
-    depth: MAPS_DEPTH,
+    depth: deps.origin === "live" ? 100 : MAPS_DEPTH,
     device: MAPS_DEVICE,
     os: MAPS_OS,
     search_this_area: true
@@ -235,7 +237,8 @@ async function loadMaps(prepared, resolution, deps) {
       location: match,
       sentToDataForSeo: deps.origin === "live",
       redact: deps.redact,
-      queryCity: prepared.city
+      queryCity: prepared.city,
+      requestedDepth: task.depth
     });
     audit.invoked = true;
     audit.sent_to_dataforseo = deps.origin === "live";
@@ -245,7 +248,8 @@ async function loadMaps(prepared, resolution, deps) {
       location: match,
       sentToDataForSeo: deps.origin === "live",
       redact: deps.redact,
-      queryCity: prepared.city
+      queryCity: prepared.city,
+      requestedDepth: task.depth
     });
     audit.sent_to_dataforseo = report.sent_to_dataforseo;
     audit.invoked = report.sent_to_dataforseo;
@@ -268,6 +272,16 @@ export async function validateNiche(input, deps) {
     loadMaps(prepared, resolution, deps)
   ]);
   const score = buildScore({ demand: demand.report, maps: maps.report, origin: deps.origin });
+  const cityMarket = cityMarketFromReports(demand.report, maps.report, deps.origin);
+  const marginIndex = Number.isInteger(prepared.margin_index) ? prepared.margin_index : null;
+  const liveComposite = deps.origin === "live" && marginIndex !== null && cityMarket.demand_index !== null && cityMarket.competition_index !== null
+    ? scoreFromIndexes({
+      demandIndex: cityMarket.demand_index,
+      competitionIndex: cityMarket.competition_index,
+      marginIndex,
+      estimated: prepared.margin_estimated === true
+    })
+    : null;
   return {
     data_origin: deps.origin,
     example_data: deps.origin === "example",
@@ -292,6 +306,8 @@ export async function validateNiche(input, deps) {
     },
     demand: demand.report,
     maps: maps.report,
+    city_market: cityMarket,
+    live_composite: liveComposite,
     score,
     requests: [...resolution.requests, demand.audit, maps.audit],
     limitations: STANDING_LIMITATIONS

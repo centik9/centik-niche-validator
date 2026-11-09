@@ -236,7 +236,7 @@ export function parseDemandPayload(payload, context) {
 }
 
 export function demandFromError(error, context) {
-  const sent = Boolean(context.sentToDataForSeo) && !["refused", "credentials_missing", "credentials_invalid"].includes(error && error.code);
+  const sent = Boolean(context.sentToDataForSeo) && !["refused", "credentials_missing", "credentials_invalid", "budget_exceeded"].includes(error && error.code);
   return shell({
     status: "failed",
     keyword: context.keyword,

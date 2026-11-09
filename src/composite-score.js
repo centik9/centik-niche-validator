@@ -126,6 +126,54 @@ export function scoreExampleMarket({ exampleRelativeDemand, exampleMonthlySearch
 
 const BAND_ORDER = { green: 0, yellow: 1, red: 2, missing: 3 };
 
+export function scoreFromIndexes({ demandIndex, competitionIndex, marginIndex, estimated = false }) {
+  const price = estimated
+    ? { status: "published", estimated: true, kind: "derived", low_dollars: 100, high_dollars: 100 }
+    : { status: "published", estimated: false, kind: "sourced", low_dollars: 100, high_dollars: 100 };
+  const scored = scoreExampleMarket({
+    exampleRelativeDemand: demandIndex,
+    exampleMonthlySearches: null,
+    exampleCompetitorCount: 0,
+    price
+  });
+  const tenths = demandIndex * 4 + competitionIndex * 3 + marginIndex * 3;
+  const value = tenths / 10;
+  const scoreBand = bandForComposite(value);
+  const band = estimated && scoreBand === "green" ? "yellow" : scoreBand;
+  return {
+    ...scored,
+    composite_tenths: tenths,
+    composite_display: formatTenths(tenths),
+    score_band: scoreBand,
+    band,
+    estimated,
+    estimate_capped: estimated && scoreBand === "green",
+    clears_green: value >= GREEN_MIN,
+    clears_green_label: estimated && value >= GREEN_MIN ? "on an estimated price" : (value >= GREEN_MIN ? "yes" : "no"),
+    data_label: "Live Google data",
+    demand: {
+      ...scored.demand,
+      label: "Live Google data",
+      index: demandIndex,
+      contribution_display: formatTenths(demandIndex * 4)
+    },
+    competition: {
+      ...scored.competition,
+      label: "Live Google data",
+      index: competitionIndex,
+      competitor_count: null,
+      contribution_display: formatTenths(competitionIndex * 3),
+      note: "Live competition uses the Maps listing count, the share with no website, and review pressure. It does not use max(3, round(28 − demand / 4))."
+    },
+    margin: {
+      ...scored.margin,
+      index: marginIndex,
+      contribution_display: formatTenths(marginIndex * 3),
+      sentence: "National published price range carried into the live check. Live mode does not reprice the job."
+    }
+  };
+}
+
 export function compareScoredRows(a, b) {
   const bandGap = BAND_ORDER[a.composite.band] - BAND_ORDER[b.composite.band];
   if (bandGap) return bandGap;

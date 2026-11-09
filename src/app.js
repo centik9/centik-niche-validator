@@ -10,8 +10,10 @@ import {
   SERVICE_NAME,
   VERSION
 } from "./config.js";
+import { accessGranted, readSession, sessionCookie, sessionTokenFromRequest, signSession } from "./auth.js";
 import { createLiveTransport } from "./dataforseo.js";
 import { HttpError } from "./errors.js";
+import { createSpendGuard, guardTransport } from "./spend.js";
 import { createExampleTransport } from "./example-transport.js";
 import { parseResolveInput, parseValidateInput } from "./input.js";
 import { createLocationDirectory } from "./locations.js";
@@ -29,6 +31,11 @@ const PUBLIC_FILES = new Map([
   ["/flow.js", { file: "flow.js", type: "text/javascript; charset=utf-8" }],
   ["/styles.css", { file: "styles.css", type: "text/css; charset=utf-8" }]
 ]);
+
+function numberEnv(value, fallback) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+}
 
 function credentialsReady(env) {
   return Boolean(env.DATAFORSEO_LOGIN && env.DATAFORSEO_LOGIN.trim() && env.DATAFORSEO_PASSWORD && env.DATAFORSEO_PASSWORD.trim());
@@ -97,19 +104,27 @@ export function createApp(options = {}) {
   const apiLimiter = createRateLimiter({ ...limits.api, clock: now });
   const liveLimiter = createRateLimiter({ ...limits.live, clock: now });
   const globalLiveLimiter = createRateLimiter({ ...limits.globalLive, clock: now });
+  const spend = createSpendGuard({
+    dataDir: options.dataDir || env.DATA_DIR || "",
+    totalUsd: numberEnv(env.BUDGET_USD_TOTAL, 10),
+    dailyUsd: numberEnv(env.BUDGET_USD_DAILY, 5),
+    now
+  });
+  const loginLimiter = createRateLimiter({ windowMs: 15 * 60_000, max: 8, clock: now });
   const exampleTransport = options.exampleTransport || createExampleTransport();
   const exampleDirectory = options.exampleDirectory || createLocationDirectory(exampleTransport, { clock: now });
   let liveCache = null;
 
   function liveBundle() {
     if (liveCache) return liveCache;
-    const transport = options.liveTransport || createLiveTransport({
+    const rawTransport = options.liveTransport || createLiveTransport({
       login: env.DATAFORSEO_LOGIN,
       password: env.DATAFORSEO_PASSWORD,
       fetchImpl: options.fetchImpl,
       timeoutMs: options.upstreamTimeoutMs,
       redact
     });
+    const transport = options.liveTransport ? rawTransport : guardTransport(rawTransport, spend);
     liveCache = {
       transport,
       directory: options.liveDirectory || createLocationDirectory(transport, { clock: now })
@@ -168,9 +183,50 @@ export function createApp(options = {}) {
   async function handle(req, res) {
     const url = new URL(req.url || "/", "http://127.0.0.1");
     const pathname = url.pathname;
-    if (req.method === "GET" && pathname === "/favicon.ico") {
-      res.writeHead(204, { "Cache-Control": "no-store" });
-      res.end();
+    if ((req.method === "GET" || req.method === "POST") && pathname === "/login") {
+      if (req.method === "GET") {
+        const page = await fs.readFile(path.join(PUBLIC_DIR, "login.html"));
+        res.writeHead(200, {
+          "Content-Type": "text/html; charset=utf-8",
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff"
+        });
+        res.end(page);
+        return;
+      }
+      const decision = loginLimiter.check(clientIp(req));
+      if (!decision.allowed) {
+        rejectRate(res, decision);
+        return;
+      }
+      if (!env.TEAM_ACCESS_CODE || !env.SESSION_SECRET) {
+        send(res, 503, { error: "auth_not_configured", message: "TEAM_ACCESS_CODE and SESSION_SECRET must be set before anyone can sign in." });
+        return;
+      }
+      const text = await readBody(req, options.maxBodyBytes || MAX_BODY_BYTES, options.bodyTimeoutMs || BODY_TIMEOUT_MS);
+      let json;
+      try {
+        json = JSON.parse(text || "{}");
+      } catch {
+        throw new HttpError(400, "invalid_json", "Request body must be JSON.");
+      }
+      if (!accessGranted(env, json.email, json.access_code)) {
+        send(res, 401, { error: "unauthorized", message: "That email or access code was not accepted." });
+        return;
+      }
+      const token = signSession(json.email, env.SESSION_SECRET, now());
+      send(res, 200, { ok: true }, { "Set-Cookie": sessionCookie(token) });
+      return;
+    }
+    if (req.method === "GET" && (pathname === "/login.js" || pathname === "/styles.css")) {
+      const name = pathname.slice(1);
+      const data = await fs.readFile(path.join(PUBLIC_DIR, name));
+      res.writeHead(200, {
+        "Content-Type": pathname.endsWith(".css") ? "text/css; charset=utf-8" : "text/javascript; charset=utf-8",
+        "Cache-Control": "no-cache",
+        "X-Content-Type-Options": "nosniff"
+      });
+      res.end(data);
       return;
     }
     if ((req.method === "GET" || req.method === "HEAD") && pathname === "/health") {
@@ -194,6 +250,21 @@ export function createApp(options = {}) {
       send(res, 200, payload);
       return;
     }
+    const session = readSession(sessionTokenFromRequest(req), env.SESSION_SECRET || "", now());
+    if (!session && pathname !== "/favicon.ico") {
+      if (pathname.startsWith("/api/")) {
+        send(res, 401, { error: "unauthorized", message: "Sign in required." });
+        return;
+      }
+      res.writeHead(302, { Location: "/login", "Cache-Control": "no-store" });
+      res.end();
+      return;
+    }
+    if (req.method === "GET" && pathname === "/favicon.ico") {
+      res.writeHead(204, { "Cache-Control": "no-store" });
+      res.end();
+      return;
+    }
     const file = req.method === "GET" ? PUBLIC_FILES.get(pathname) : null;
     if (file) {
       const full = path.join(PUBLIC_DIR, file.file);
@@ -205,6 +276,10 @@ export function createApp(options = {}) {
         "Content-Security-Policy": "default-src 'self'; style-src 'self'; script-src 'self'; img-src 'none'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
       });
       res.end(data);
+      return;
+    }
+    if (req.method === "GET" && pathname === "/api/spend") {
+      send(res, 200, spend.totals());
       return;
     }
     if (!["/api/resolve", "/api/validate", "/api/screen", "/api/microsite"].includes(pathname)) {

@@ -169,6 +169,7 @@ function showSubniches(report, error) {
   slot.append(list);
 }
 
+let liveReady = false;
 let suggestTimer = null;
 let suggestRequest = 0;
 
@@ -463,13 +464,13 @@ function renderBreakdown(composite) {
   block.append(el("p", {}, [
     demand.contribution_display === null
       ? "Demand missing."
-      : `Demand ${demand.index} × 40% = ${demand.contribution_display}. EXAMPLE search volume ${demand.monthly_searches} monthly searches.`
+      : `Demand ${demand.index} × 40% = ${demand.contribution_display}. ${demand.label || "EXAMPLE"} search volume ${demand.monthly_searches} monthly searches.`
   ]));
   const competition = composite.competition;
   block.append(el("p", {}, [
     competition.contribution_display === null
       ? "Competition missing."
-      : `Competition ${competition.index} × 30% = ${competition.contribution_display}. EXAMPLE competitor count ${competition.competitor_count}. Less competition scores higher.`
+      : `Competition ${competition.index} × 30% = ${competition.contribution_display}. ${competition.label || "EXAMPLE"} competitor count ${competition.competitor_count}. Less competition scores higher.`
   ]));
   const margin = composite.margin;
   block.append(el("p", {}, [
@@ -536,13 +537,15 @@ function renderGate() {
   const gate = state.proposal.deep_check_gate;
   const slot = $("deep-slot");
   slot.replaceChildren();
-  slot.append(el("p", { class: "notice" }, ["Paid DataForSEO check is off. Yes did not authorize spending."]));
+  slot.append(el("p", { class: "notice" }, [liveReady
+    ? "Live mode is on. This check is about $0.092: $0.09 for Google Ads and $0.002 for Maps. A repeated query within 7 days is not charged again."
+    : "Paid DataForSEO check is off. Yes did not authorize spending."]));
   slot.append(el("p", {}, [gate.reason]));
   if (!gate.example_check_available) {
     slot.append(el("p", { class: "score-withheld" }, ["Example check withheld"]));
     return;
   }
-  const button = el("button", { type: "button" }, ["Run example deep check"]);
+  const button = el("button", { type: "button" }, [liveReady ? "Run live check" : "Run example deep check"]);
   button.addEventListener("click", runExampleCheck);
   slot.append(button);
   slot.append(el("div", { id: "deep-result" }));
@@ -550,11 +553,12 @@ function renderGate() {
 
 async function runExampleCheck() {
   const result = $("deep-result");
-  result.replaceChildren(el("p", {}, ["Running the example check…"]));
+  result.replaceChildren(el("p", {}, [liveReady ? "Running the live check…" : "Running the example check…"]));
   try {
     const location = state.proposal.location;
+    const mode = liveReady ? "live" : "example";
     const resolved = await post("/api/resolve", {
-      mode: "example",
+      mode,
       city: location.name,
       state: location.state,
       country: "United States"
@@ -565,7 +569,9 @@ async function runExampleCheck() {
       location_type: match.location_type
     } : null;
     const report = await post("/api/validate", {
-      mode: "example",
+      mode,
+      margin_index: state.proposal.composite && state.proposal.composite.margin ? state.proposal.composite.margin.index : undefined,
+      margin_estimated: Boolean(state.proposal.composite && state.proposal.composite.estimated),
       niche: state.subniche.label,
       city: location.name,
       state: location.state,
@@ -577,6 +583,19 @@ async function runExampleCheck() {
       }
     });
     result.replaceChildren();
+    if (report.city_market) result.append(el("p", {}, [`Demand: ${report.city_market.demand_label}. Competition: ${report.city_market.competition_label}.`]));
+    if (report.live_composite) {
+      result.append(el("p", { class: "score-number" }, [report.live_composite.composite_display]));
+      const slot = $("proposal-slot");
+      const current = slot.querySelector("figure.gauge");
+      if (current) {
+        const next = renderGauge(report.live_composite);
+        next.append(el("p", { class: "help demand-note" }, ["Live Google data for this city. Competition uses the map-pack count, review counts, and listings with no website."]));
+        current.replaceWith(next);
+      }
+      const breakdown = slot.querySelector(".breakdown");
+      if (breakdown) breakdown.replaceWith(renderBreakdown(report.live_composite));
+    }
     if (report.example_banner) result.append(el("p", { class: "banner" }, [report.example_banner]));
     const score = report.score;
     if (!score || score.overall_status !== "calculated" || score.overall_display === null) {
@@ -584,7 +603,7 @@ async function runExampleCheck() {
       result.append(el("p", {}, [score && score.withheld_reason ? score.withheld_reason : "No combined index."]));
     } else {
       result.append(el("p", { class: "score-number" }, [score.overall_display]));
-      result.append(el("p", {}, ["Example heuristic index. Not a recommendation."]));
+      result.append(el("p", {}, [report.city_market && report.city_market.live ? "Live Google data. Not a recommendation." : "Example data. Not a recommendation."]));
     }
     result.append(el("p", {}, [
       `Keyword sent: ${report.niche}. City: ${report.normalized_query.city}, ${report.normalized_query.state}.`
@@ -598,8 +617,9 @@ $("keyword").addEventListener("input", scheduleSuggestions);
 paintStepper();
 
 fetch("/health").then((response) => response.json()).then((health) => {
+  liveReady = Boolean(health.live_mode && health.credentials_configured);
   const live = health.live_mode ? "on" : "off";
-  $("server-status").textContent = `Server ${health.version}. Live mode ${live}. Example preview. Credentials are never shown.`;
+  $("server-status").textContent = `Server ${health.version}. Live mode ${live}. ${liveReady ? "Live Google data is available after you run a check." : "Example data until live mode and credentials are set."} Credentials are never shown.`;
 }).catch(() => {
   $("server-status").textContent = "Health check failed.";
 });

@@ -53,7 +53,7 @@ export function assertSafeRequest({ method, path, body }) {
     assertKeyword(task.keyword, "Keyword");
     if (!Number.isInteger(task.location_code) || task.location_code <= 0) refused("A confirmed location_code is required.");
     if (task.language_code !== LANGUAGE_CODE) refused("language_code must be en.");
-    if (task.depth !== MAPS_DEPTH) refused("Maps depth must be exactly 20.");
+    if (task.depth !== 20 && task.depth !== 100) refused("Maps depth must be 20 for the example path or 100 for a live check.");
     if (task.search_this_area !== true) refused("search_this_area must be true.");
     if (task.device !== MAPS_DEVICE || task.os !== MAPS_OS) refused("Maps device and os are fixed.");
     if ("location_name" in task || "location_coordinate" in task) refused("location_name and coordinates are not sent.");

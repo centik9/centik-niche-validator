@@ -3,7 +3,7 @@ import { classifyNumber, field } from "./measurement.js";
 import { normalizePlace } from "./normalize.js";
 import { readTask } from "./provider.js";
 
-const DEPTH_NOTE = "This app requests depth 20. DataForSEO's Maps live endpoint defaults to 100 and allows 700. Billing is per SERP of up to 100 results, and depth above 100 can cost more. A returned sample is not exhaustive.";
+const DEPTH_NOTE = "Example checks request depth 20. Live checks request depth 100, which is one billed Maps page. Depth above 100 is refused. A returned sample is not exhaustive.";
 const SE_NOTE = "DataForSEO documents se_results_count as the total number of results in the SERP. It is not a verified census of businesses, and it is never used in the score.";
 const REGION_NOTE = "DataForSEO documents address_info.region as the DMA region. Some responses put a state name there. This app does not use it as a verified state filter.";
 const CLAIMED_NOTE = "is_claimed means the Google listing has a claimed owner. Buyers are not verified.";
@@ -62,12 +62,12 @@ function emptyDedup(status) {
   };
 }
 
-export function mapsShell({ status, location, sentToDataForSeo, message, code, queryCity }) {
+export function mapsShell({ status, location, sentToDataForSeo, message, code, queryCity, requestedDepth }) {
   return {
     status,
     endpoint: `POST ${MAPS_PATH}`,
     source: MAPS_SOURCE,
-    requested_depth: MAPS_DEPTH,
+    requested_depth: requestedDepth || MAPS_DEPTH,
     depth_note: DEPTH_NOTE,
     device: MAPS_DEVICE,
     os: MAPS_OS,
@@ -147,6 +147,7 @@ function dedupe(items, queryCity) {
   let claimed = 0;
   let notClaimed = 0;
   let claimUnknown = 0;
+  let withoutWebsite = 0;
 
   for (const { item } of indexed) {
     if (!item || typeof item !== "object") {
@@ -207,6 +208,8 @@ function dedupe(items, queryCity) {
     else claimUnknown += 1;
     const city = item.address_info && item.address_info.city;
     if (typeof city === "string" && city.trim() && queryNorm && normalizePlace(city) !== queryNorm) differentCity += 1;
+    const site = item.domain || item.url || (item.contact_info && item.contact_info.url);
+    if (typeof site !== "string" || !site.trim()) withoutWebsite += 1;
     const region = item.address_info && item.address_info.region;
     if (typeof region === "string" && region.trim() && regions.length < 8 && !regions.includes(region.trim())) {
       regions.push(region.trim());
@@ -228,7 +231,8 @@ function dedupe(items, queryCity) {
       listings_missing_votes: votesUnknown,
       note: RATING_NOTE
     },
-    claimed: { claimed, not_claimed: notClaimed, unknown: claimUnknown, note: CLAIMED_NOTE }
+    claimed: { claimed, not_claimed: notClaimed, unknown: claimUnknown, note: CLAIMED_NOTE },
+    withoutWebsite
   };
 }
 
@@ -285,7 +289,8 @@ export function parseMapsPayload(payload, context) {
     status: parsed.dedup.unique_organic_listings.status,
     location: context.location,
     sentToDataForSeo: context.sentToDataForSeo,
-    queryCity: context.queryCity
+    queryCity: context.queryCity,
+    requestedDepth: context.requestedDepth
   });
   report.items_returned = items.length;
   report.se_results_count = seCount(serp.se_results_count, items.length);
@@ -298,6 +303,7 @@ export function parseMapsPayload(payload, context) {
     note: REGION_NOTE
   };
   report.ratings = parsed.ratings;
+  report.listings_without_website = parsed.withoutWebsite;
   report.claimed = parsed.claimed;
   report.provider_reported_cost_usd = field(read.cost === null ? "missing" : read.cost === 0 ? "measured_zero" : "measured", read.cost, {
     unit: "USD",
@@ -308,13 +314,14 @@ export function parseMapsPayload(payload, context) {
 }
 
 export function mapsFromError(error, context) {
-  const sent = Boolean(context.sentToDataForSeo) && !["refused", "credentials_missing", "credentials_invalid"].includes(error && error.code);
+  const sent = Boolean(context.sentToDataForSeo) && !["refused", "credentials_missing", "credentials_invalid", "budget_exceeded"].includes(error && error.code);
   return mapsShell({
     status: "failed",
     location: context.location,
     sentToDataForSeo: sent,
     message: context.redact ? context.redact(error && error.message).slice(0, 300) : String(error && error.message || "Maps request failed.").slice(0, 300),
     code: (error && error.code) || "failed",
-    queryCity: context.queryCity
+    queryCity: context.queryCity,
+    requestedDepth: context.requestedDepth
   });
 }
