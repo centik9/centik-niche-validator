@@ -18,8 +18,8 @@ test("generic plumbing words keep today's composite order", () => {
   assert.deepEqual(ids("  plumbing  "), ids("plumbing"));
   assert.deepEqual(ids("plumbers near me"), ids("plumbing"));
   assert.equal(plain.subniches.every((item) => item.match.tier === "none" && item.match.label === null), true);
-  assert.equal(plain.subniches[0].id, "water-heater-repair");
-  assert.equal(row("plumber", "emergency-plumbing").example_rank > 1, true);
+  assert.equal(plain.subniches[0].id, "emergency-plumbing");
+  assert.equal(plain.subniches[0].match.tier, "none");
 });
 
 test("specific query words move the matching sub-niche up without changing its composite", () => {
@@ -27,7 +27,7 @@ test("specific query words move the matching sub-niche up without changing its c
   assert.equal(emergency.subniches[0].id, "emergency-plumbing");
   assert.equal(emergency.subniches[0].match.tier, "full");
   assert.equal(emergency.subniches[0].match.label, "matches your search");
-  assert.equal(emergency.subniches[0].composite.status, "withheld");
+  assert.equal(emergency.subniches[0].composite.composite_display, "75.3");
   assert.equal(row("EMERGENCY   Plumber!!", "emergency-plumbing").example_rank, 1);
   assert.equal(row("24/7 plumbing", "emergency-plumbing").match.tier, "full");
 

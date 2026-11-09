@@ -32,13 +32,17 @@ test("plumbing sub-niches are a 20-row composite leaderboard", () => {
   assert.equal(drain.price.high_dollars, 352);
   assert.equal(drain.price.city_adjusted, false);
   assert.equal(drain.price.source_name, "Angi");
-  assert.equal(result.price_coverage.missing_ids.includes("emergency-plumbing"), true);
+  assert.equal(result.price_coverage.missing_ids.includes("emergency-plumbing"), false);
   assert.equal(result.price_coverage.missing_ids.includes("bath-remodel-plumbing"), true);
   assert.equal(result.price_coverage.missing_ids.includes("repipe"), true);
   const emergency = result.subniches.find((item) => item.id === "emergency-plumbing");
-  assert.equal(emergency.composite.status, "withheld");
-  assert.equal(emergency.composite.band, "missing");
-  assert.equal(emergency.price.sentence, "Price range missing");
+  assert.equal(emergency.price.low_dollars, 210);
+  assert.equal(emergency.price.high_dollars, 620);
+  assert.equal(emergency.price.source_name, "Thumbtack");
+  assert.equal(emergency.composite.status, "calculated");
+  assert.equal(emergency.composite.composite_display, "75.3");
+  assert.equal(emergency.composite.band, "green");
+  assert.equal(emergency.example_rank, 1);
   assert.match(result.ranking_note, /not adjusted for a city/);
 });
 
@@ -108,8 +112,11 @@ test("a proposal must match the keyword and does not authorize spending", () => 
   assert.equal(proposal.domain_availability, "not_checked");
   assert.equal(proposal.deep_check_gate.paid_calls_allowed, false);
   assert.equal(proposal.deep_check_gate.example_check_available, true);
-  assert.equal(proposal.composite.status, "withheld");
-  assert.equal(proposal.deep_check_gate.clears_green, "not calculated");
+  assert.equal(proposal.composite.status, "calculated");
+  assert.equal(proposal.composite.composite_display, "72.5");
+  assert.equal(proposal.deep_check_gate.clears_green, "yes");
+  assert.equal(proposal.price.low_dollars, 210);
+  assert.equal(proposal.price.high_dollars, 620);
   const nyc = buildProposal({ keyword: "plumbing", subniche_id: "drain-cleaning", location_id: "new-york-ny" });
   assert.equal(nyc.composite.demand.index, 90);
   assert.equal(nyc.composite.demand.monthly_searches, 1080);

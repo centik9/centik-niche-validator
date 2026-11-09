@@ -3,6 +3,17 @@
   "scope": "national_united_states",
   "city_adjusted": false,
   "ranges": {
+    "emergency-plumbing": {
+      "job_label": "Emergency plumbing",
+      "low_dollars": 210,
+      "high_dollars": 620,
+      "unit": "per_job",
+      "range_basis": "published_average_range",
+      "source_name": "Thumbtack",
+      "source_title": "24 hour plumbers",
+      "url": "https://www.thumbtack.com/k/24-hour-plumbers/near-me",
+      "quote": "Most people pay an average of about $210 to $620* for emergency services."
+    },
     "drain-cleaning": {
       "job_label": "Drain cleaning",
       "low_dollars": 147,
