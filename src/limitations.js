@@ -1,0 +1,20 @@
+export const STANDING_LIMITATIONS = [
+  "Search volume is Google Ads' approximate average monthly searches via DataForSEO Keywords Data. It is not a count of customers.",
+  "A null search volume means no data was returned. A null is not treated as zero demand, and it never produces a combined index.",
+  "A measured search volume of zero stays a measured zero and can enter the combined index only together with a non-empty measured Maps sample.",
+  "CPC is the average Google Ads cost per click in USD. CPC is not revenue, not customer value, and not advertiser spend. This app does not multiply CPC by search volume.",
+  "Google Ads competition and competition_index are paid-search advertiser competition, not local business competition.",
+  "Google Ads may return no data for some keywords, may combine similar keywords, and may spell-correct the keyword you sent.",
+  "Volume requests omit search partners and omit a custom date range. DataForSEO's default is the past 12 months, and Google Ads does not return the current month. The report also shows the months actually present in the payload.",
+  "Requests use language_code en. Demand in other languages is not measured.",
+  "Google Ads location codes and Google Maps location codes come from separate location lists. A code from one list is never sent to the other product.",
+  "A city is used only when the city name, state or region, and country all match a City or Municipality row and a parent admin region confirms that state. A same-named city in another state is not selected.",
+  "If that confirmation fails, search volume and Maps are not requested for the unconfirmed product.",
+  "Maps parsing depth is fixed at 20. The endpoint default is 100 and the maximum is 700, billed per SERP of up to 100 results, with extra charges possible above 100. This app does not request those extra results. A sample of 20 is not exhaustive.",
+  "se_results_count is not a verified census of businesses. Published DataForSEO examples can show 0 while items are present. The field is never used in the score.",
+  "Organic listings are deduplicated by place_id, then cid, then normalized title and address. Paid items and directory items are excluded from the organic count. Listings whose address city differs are kept and counted, not silently dropped.",
+  "is_claimed means someone has claimed the Google listing. Buyers are not verified.",
+  "The combined index is a weighted heuristic with the bands and weights in this response. It is not a grade, not a recommendation, and not an economic valuation.",
+  "The combined index is withheld when demand is missing, unsupported, or failed, and when the Maps sample is missing or measured as zero listings. An empty Maps sample is not scored as an open market.",
+  "Example mode returns fixture data from this repository. Example mode is not a measurement of the city you typed, and example location codes are not DataForSEO codes."
+];

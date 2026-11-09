@@ -1,0 +1,35 @@
+{
+  "label": "Frozen sample rows copied from named public sources on 2026-11-08. Not a live query and not a national screen.",
+  "places": {
+    "4805000": {"n": "Austin city", "st": "TX", "hu": 466428, "occ": 440294, "own": 195678, "ytot": 466428, "old": 136960, "old_partial": false, "inc": 91461},
+    "4835000": {"n": "Houston city", "st": "TX", "hu": 1023112, "occ": 916536, "own": 384672, "ytot": 1023112, "old": 493937, "old_partial": false, "inc": 62894},
+    "4819000": {"n": "Dallas city", "st": "TX", "hu": 584643, "occ": 528038, "own": 223665, "ytot": 584643, "old": 289502, "old_partial": false, "inc": 67760},
+    "1772000": {"n": "Springfield city", "st": "IL", "hu": 57220, "occ": 50803, "own": 32232, "ytot": 57220, "old": 37908, "old_partial": false, "inc": 65537},
+    "2970000": {"n": "Springfield city", "st": "MO", "hu": 83980, "occ": 79439, "own": 34069, "ytot": 83980, "old": 48152, "old_partial": false, "inc": 45984}
+  },
+  "counties": {
+    "48453": {"n": "Travis County", "st": "TX", "hu": 594638, "occ": 561491, "own": 297755, "ytot": 594638, "old": 149268, "old_partial": false, "inc": 97169},
+    "48201": {"n": "Harris County", "st": "TX", "hu": 1884607, "occ": 1728103, "own": 946389, "ytot": 1884607, "old": 718323, "old_partial": false, "inc": 73104},
+    "48231": {"n": "Hunt County", "st": "TX", "hu": 41973, "occ": 37549, "own": 26580, "ytot": 41973, "old": 15679, "old_partial": false, "inc": 70112},
+    "48113": {"n": "Dallas County", "st": "TX", "hu": 1053471, "occ": 971690, "own": 493453, "ytot": 1053471, "old": 483651, "old_partial": false, "inc": 74149},
+    "13121": {"n": "Fulton County", "st": "GA", "hu": 500404, "occ": 457791, "own": 247837, "ytot": 500404, "old": 166418, "old_partial": false, "inc": 91490}
+  },
+  "metros": {
+    "12420": {"n": "Austin-Round Rock-San Marcos, TX Metro Area", "st": "", "hu": 1001295, "occ": 948649, "own": 558660, "ytot": 1001295, "old": 202171, "old_partial": false, "inc": 97638},
+    "26420": {"n": "Houston-Pasadena-The Woodlands, TX Metro Area", "st": "", "hu": 2839496, "occ": 2601888, "own": 1592707, "ytot": 2839496, "old": 924336, "old_partial": false, "inc": 80458}
+  },
+  "soil_snapshot": {
+    "48453": {"areasymbol": "TX453", "high_acres": 219251.17, "rated_acres": 492135.8},
+    "48201": {"areasymbol": "TX201", "high_acres": 289930.32, "rated_acres": 765230.52},
+    "48231": {"areasymbol": "TX231", "high_acres": 447120.78, "rated_acres": 475824.93},
+    "48113": {"areasymbol": "TX113", "high_acres": 279711.49, "rated_acres": 398049.24},
+    "13121": {"areasymbol": "GA121", "high_acres": 297.65, "rated_acres": 219199.6}
+  },
+  "drought_snapshot": {
+    "48453": {"period": "202412", "value": -2.53, "title": "Travis County, Texas December Palmer Drought Severity Index (PDSI)"},
+    "48201": {"period": "202412", "value": -2.03, "title": "Harris County, Texas December Palmer Drought Severity Index (PDSI)"},
+    "48231": {"period": "202412", "value": 0.69, "title": "Hunt County, Texas December Palmer Drought Severity Index (PDSI)"},
+    "48113": {"period": "202412", "value": 0.55, "title": "Dallas County, Texas December Palmer Drought Severity Index (PDSI)"},
+    "13121": {"period": "202412", "value": -0.78, "title": "Fulton County, Georgia December Palmer Drought Severity Index (PDSI)"}
+  }
+}

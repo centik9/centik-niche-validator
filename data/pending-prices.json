@@ -1,0 +1,62 @@
+{
+  "read_date": "2026-11-09",
+  "note": "Sourced from the allowlist on 2026-11-09. reviewed is false until Abel accepts a row. These ranges must not paint a leaderboard row green.",
+  "ranges": {
+    "bath-remodel-plumbing": {
+      "job_label": "Bathroom rough-in plumbing",
+      "low_dollars": 3000,
+      "high_dollars": 20000,
+      "unit": "per_job",
+      "kind": "sourced",
+      "reviewed": false,
+      "source_name": "Angi",
+      "source_url": "https://www.angi.com/articles/what-does-it-cost-run-new-plumbing-toilet-shower-and-sink-room-adjacent-other-bathroom.htm",
+      "url": "https://www.angi.com/articles/what-does-it-cost-run-new-plumbing-toilet-shower-and-sink-room-adjacent-other-bathroom.htm",
+      "quote": "In 2026, the national average cost of rough-in plumbing for a bathroom is $6,500. Most homeowners spend between $3,000 and $20,000",
+      "read_date": "2026-11-09",
+      "note": "Pending Abel review. This is bathroom rough-in plumbing. A separate Angi remodel page says plumbing updates during a bathroom remodel average $800, which is one average and not a range."
+    },
+    "repipe": {
+      "job_label": "Whole-home repipe",
+      "low_dollars": 1500,
+      "high_dollars": 15000,
+      "unit": "per_job",
+      "kind": "sourced",
+      "reviewed": false,
+      "source_name": "Angi",
+      "source_url": "https://www.angi.com/articles/cost-to-repipe-a-house.htm",
+      "url": "https://www.angi.com/articles/cost-to-repipe-a-house.htm",
+      "quote": "In 2026, the national average cost to repipe a house is $7,500. Most homeowners spend between $1,500 and $15,000",
+      "read_date": "2026-11-09",
+      "note": "Pending Abel review. This is the whole-home repipe job. No allowlisted page published a consultation-only fee."
+    }
+  },
+  "not_used_for_the_scored_row": [
+    {
+      "topic": "Garage door emergency cable repair",
+      "low_dollars": 250,
+      "high_dollars": 350,
+      "unit": "per_job",
+      "kind": "sourced",
+      "reviewed": false,
+      "source_name": "HomeGuide",
+      "source_url": "https://homeguide.com/costs/garage-door-cable-repair-cost",
+      "quote": "Emergency cable repair service costs $250 to $350.",
+      "read_date": "2026-11-09",
+      "why_not_scored": "The garage door row already uses the reviewed HomeGuide standard range of $150 to $350 per job. HomeGuide, Angi, and HomeAdvisor still do not publish a general emergency garage-door job range. This figure is emergency cable repair only, so it does not replace the reviewed row."
+    },
+    {
+      "topic": "AC emergency hourly labor",
+      "low_dollars": 160,
+      "high_dollars": 250,
+      "unit": "per_hour",
+      "kind": "sourced",
+      "reviewed": false,
+      "source_name": "HomeGuide",
+      "source_url": "https://homeguide.com/costs/ac-repair-cost",
+      "quote": "AC technicians charge $75 to $150 per hour for labor during regular business hours and $160 to $250 per hour for emergency repairs during the night, weekend, or a holiday.",
+      "read_date": "2026-11-09",
+      "why_not_scored": "The HVAC row already uses the reviewed HomeGuide emergency rate of $140 to $250 per hour. This AC page is a second emergency hourly range and stays pending."
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: centik-niche-validator
+    runtime: node
+    plan: free
+    buildCommand: npm ci
+    startCommand: node src/server.js
+    healthCheckPath: /health
+    envVars:
+      - key: DATAFORSEO_LIVE
+        sync: false
+      - key: DATAFORSEO_LOGIN
+        sync: false
+      - key: DATAFORSEO_PASSWORD
+        sync: false
+      - key: DATAFORSEO_SPENT_BASELINE_USD
+        sync: false
+      - key: SPEND_CAP_USD
+        sync: false
+      - key: SPEND_TOKEN_SECRET
+        sync: false
+      - key: SESSION_SECRET
+        sync: false
+      - key: TEAM_ACCESS_CODE_HASH
+        sync: false
+      - key: ALLOWED_EMAILS
+        sync: false
