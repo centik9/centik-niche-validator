@@ -1,0 +1,55 @@
+{
+  "fixture": true,
+  "note": "Test fixtures only. These rows are not live prices and are not shown in the preview.",
+  "ranges": [
+    {
+      "niche_id": "plumbing",
+      "role": "emergency",
+      "kind": "sourced",
+      "reviewed": true,
+      "low_dollars": 210,
+      "high_dollars": 620,
+      "source_name": "Thumbtack",
+      "source_url": "https://www.thumbtack.com/k/24-hour-plumbers/near-me",
+      "quote": "Most people pay an average of about $210 to $620* for emergency services.",
+      "read_date": "2026-11-09"
+    },
+    {
+      "niche_id": "hvac",
+      "role": "emergency",
+      "kind": "sourced",
+      "reviewed": true,
+      "low_dollars": 400,
+      "high_dollars": 900,
+      "source_name": "HomeGuide",
+      "source_url": "https://homeguide.com/costs/hvac-emergency-fixture",
+      "quote": "Fixture emergency range for tests.",
+      "read_date": "2026-11-09",
+      "trip_fee_dollars": 75
+    },
+    {
+      "niche_id": "drain-cleaning",
+      "role": "standard",
+      "kind": "sourced",
+      "reviewed": true,
+      "low_dollars": 100,
+      "high_dollars": 300,
+      "source_name": "Angi",
+      "source_url": "https://www.angi.com/articles/drain-fixture",
+      "quote": "Fixture standard range for tests.",
+      "read_date": "2026-11-09"
+    },
+    {
+      "niche_id": "lockout",
+      "role": "emergency",
+      "kind": "sourced",
+      "reviewed": true,
+      "low_dollars": 80,
+      "high_dollars": 250,
+      "source_name": "Angi",
+      "source_url": "https://www.angi.com/articles/lockout-fixture",
+      "quote": "Fixture direct emergency price.",
+      "read_date": "2025-01-01"
+    }
+  ]
+}

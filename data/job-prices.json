@@ -12,7 +12,12 @@
       "source_name": "Thumbtack",
       "source_title": "24 hour plumbers",
       "url": "https://www.thumbtack.com/k/24-hour-plumbers/near-me",
-      "quote": "Most people pay an average of about $210 to $620* for emergency services."
+      "quote": "Most people pay an average of about $210 to $620* for emergency services.",
+      "kind": "sourced",
+      "source_url": "https://www.thumbtack.com/k/24-hour-plumbers/near-me",
+      "read_date": "2026-11-09",
+      "reviewed": true,
+      "borrowed_from": []
     },
     "drain-cleaning": {
       "job_label": "Drain cleaning",
@@ -24,7 +29,12 @@
       "source_title": "How Much Does Drain Cleaning Cost? [2026 Data]",
       "source_updated": "2026-10-30",
       "url": "https://www.angi.com/articles/how-much-does-drain-cleaning-cost.htm",
-      "quote": "Most homeowners pay between $147 and $352."
+      "quote": "Most homeowners pay between $147 and $352.",
+      "kind": "sourced",
+      "source_url": "https://www.angi.com/articles/how-much-does-drain-cleaning-cost.htm",
+      "read_date": "2026-11-08",
+      "reviewed": true,
+      "borrowed_from": []
     },
     "water-heater-repair": {
       "job_label": "Tank water heater repair",
@@ -36,7 +46,12 @@
       "source_title": "How Much Does Water Heater Repair Cost? (2026)",
       "source_updated": "2025-08-07",
       "url": "https://homeguide.com/costs/water-heater-repair-cost",
-      "quote": "Hot water heater repair costs $150 to $700 on average for a tank."
+      "quote": "Hot water heater repair costs $150 to $700 on average for a tank.",
+      "kind": "sourced",
+      "source_url": "https://homeguide.com/costs/water-heater-repair-cost",
+      "read_date": "2026-11-08",
+      "reviewed": true,
+      "borrowed_from": []
     },
     "leak-detection": {
       "job_label": "Water leak detection",
@@ -48,7 +63,12 @@
       "source_title": "How to Find a Water Leak: 11 Tips for Homeowners",
       "source_updated": "2026-07-15",
       "url": "https://www.angi.com/articles/how-find-leak.htm",
-      "quote": "Water leak detection normally costs between $100 and $500."
+      "quote": "Water leak detection normally costs between $100 and $500.",
+      "kind": "sourced",
+      "source_url": "https://www.angi.com/articles/how-find-leak.htm",
+      "read_date": "2026-11-08",
+      "reviewed": true,
+      "borrowed_from": []
     },
     "toilet-repair": {
       "job_label": "Toilet repair",
@@ -60,7 +80,12 @@
       "source_title": "How Much Does Plumbing Repair Cost? [2026 Data]",
       "source_updated": "2026-10-14",
       "url": "https://www.angi.com/articles/plumber-cost.htm",
-      "quote": "Toilet Repair $100–$300."
+      "quote": "Toilet Repair $100–$300.",
+      "kind": "sourced",
+      "source_url": "https://www.angi.com/articles/plumber-cost.htm",
+      "read_date": "2026-11-08",
+      "reviewed": true,
+      "borrowed_from": []
     },
     "faucet-repair": {
       "job_label": "Leaky faucet repair",
@@ -72,7 +97,12 @@
       "source_title": "How Much Does It Cost to Fix a Leaky Faucet? [2026 Data]",
       "source_updated": "2026-09-29",
       "url": "https://www.angi.com/articles/plumber-cost-to-fix-leaky-faucet.htm",
-      "quote": "Most homeowners pay between $100 and $400."
+      "quote": "Most homeowners pay between $100 and $400.",
+      "kind": "sourced",
+      "source_url": "https://www.angi.com/articles/plumber-cost-to-fix-leaky-faucet.htm",
+      "read_date": "2026-11-08",
+      "reviewed": true,
+      "borrowed_from": []
     },
     "sewer-line": {
       "job_label": "Main sewer line clog repair",
@@ -84,7 +114,12 @@
       "source_title": "How Much Does Main Sewer Line Clog Repair Cost? [2026 Data]",
       "source_updated": "2026-10-08",
       "url": "https://www.angi.com/articles/cost-to-clear-a-main-sewer-line-clog.htm",
-      "quote": "Most homeowners pay between $188 and $573."
+      "quote": "Most homeowners pay between $188 and $573.",
+      "kind": "sourced",
+      "source_url": "https://www.angi.com/articles/cost-to-clear-a-main-sewer-line-clog.htm",
+      "read_date": "2026-11-08",
+      "reviewed": true,
+      "borrowed_from": []
     },
     "garbage-disposal": {
       "job_label": "Garbage disposal repair",
@@ -96,7 +131,12 @@
       "source_title": "How Much Does Plumbing Repair Cost? [2026 Data]",
       "source_updated": "2026-10-14",
       "url": "https://www.angi.com/articles/plumber-cost.htm",
-      "quote": "Garbage Disposal Repair $150–$300."
+      "quote": "Garbage Disposal Repair $150–$300.",
+      "kind": "sourced",
+      "source_url": "https://www.angi.com/articles/plumber-cost.htm",
+      "read_date": "2026-11-08",
+      "reviewed": true,
+      "borrowed_from": []
     },
     "pipe-repair": {
       "job_label": "Leaking pipe repair",
@@ -108,7 +148,12 @@
       "source_title": "How Much Does Plumbing Repair Cost? [2026 Data]",
       "source_updated": "2026-10-14",
       "url": "https://www.angi.com/articles/plumber-cost.htm",
-      "quote": "Leaking Pipes $175–$550."
+      "quote": "Leaking Pipes $175–$550.",
+      "kind": "sourced",
+      "source_url": "https://www.angi.com/articles/plumber-cost.htm",
+      "read_date": "2026-11-08",
+      "reviewed": true,
+      "borrowed_from": []
     },
     "sump-pump": {
       "job_label": "Sump pump repair",
@@ -120,7 +165,12 @@
       "source_title": "How Much Does Plumbing Repair Cost? [2026 Data]",
       "source_updated": "2026-10-14",
       "url": "https://www.angi.com/articles/plumber-cost.htm",
-      "quote": "Sump Pump Repair $300–$1,000."
+      "quote": "Sump Pump Repair $300–$1,000.",
+      "kind": "sourced",
+      "source_url": "https://www.angi.com/articles/plumber-cost.htm",
+      "read_date": "2026-11-08",
+      "reviewed": true,
+      "borrowed_from": []
     },
     "kitchen-sink": {
       "job_label": "Kitchen or bathroom sink drain-pipe replacement",
@@ -132,7 +182,12 @@
       "source_title": "How Much Are Average Plumbing Estimates? (2026)",
       "source_updated": "2025-12-31",
       "url": "https://homeguide.com/costs/average-plumbing-estimates",
-      "quote": "The cost to replace the bathroom or kitchen sink drain pipes is $100 to $350."
+      "quote": "The cost to replace the bathroom or kitchen sink drain pipes is $100 to $350.",
+      "kind": "sourced",
+      "source_url": "https://homeguide.com/costs/average-plumbing-estimates",
+      "read_date": "2026-11-08",
+      "reviewed": true,
+      "borrowed_from": []
     },
     "water-filtration": {
       "job_label": "Under-sink water filter installation",
@@ -144,7 +199,12 @@
       "source_title": "How Much Does It Cost to Install an Under-Sink Water Filter? [2026 Data]",
       "source_updated": "2026-09-11",
       "url": "https://www.angi.com/articles/cost-to-install-under-sink-water-filter.htm",
-      "quote": "Most homeowners spend between $300 and $1,250. The same page also lists $100 to $3,000 across filter types."
+      "quote": "Most homeowners spend between $300 and $1,250. The same page also lists $100 to $3,000 across filter types.",
+      "kind": "sourced",
+      "source_url": "https://www.angi.com/articles/cost-to-install-under-sink-water-filter.htm",
+      "read_date": "2026-11-08",
+      "reviewed": true,
+      "borrowed_from": []
     },
     "gas-line": {
       "job_label": "Gas line repair",
@@ -156,7 +216,12 @@
       "source_title": "How Much Does Plumbing Repair Cost? [2026 Data]",
       "source_updated": "2026-10-14",
       "url": "https://www.angi.com/articles/plumber-cost.htm",
-      "quote": "Gas Line Repair $250–$750."
+      "quote": "Gas Line Repair $250–$750.",
+      "kind": "sourced",
+      "source_url": "https://www.angi.com/articles/plumber-cost.htm",
+      "read_date": "2026-11-08",
+      "reviewed": true,
+      "borrowed_from": []
     },
     "hydro-jetting": {
       "job_label": "Hydro jetting",
@@ -168,7 +233,12 @@
       "source_title": "How Much Does Hydro Jetting Cost? [2026 Data]",
       "source_updated": "2026-10-23",
       "url": "https://www.angi.com/articles/hydro-jetting-cost.htm",
-      "quote": "Most homeowners pay between $350 and $600. The same page says costs can reach $2,000 for complex blockages."
+      "quote": "Most homeowners pay between $350 and $600. The same page says costs can reach $2,000 for complex blockages.",
+      "kind": "sourced",
+      "source_url": "https://www.angi.com/articles/hydro-jetting-cost.htm",
+      "read_date": "2026-11-08",
+      "reviewed": true,
+      "borrowed_from": []
     },
     "hose-bib": {
       "job_label": "Outdoor faucet replacement",
@@ -180,7 +250,12 @@
       "source_title": "How Much Are Average Plumbing Estimates? (2026)",
       "source_updated": "2025-12-31",
       "url": "https://homeguide.com/costs/average-plumbing-estimates",
-      "quote": "Outdoor faucets cost $50 to $150 for a basic replacement."
+      "quote": "Outdoor faucets cost $50 to $150 for a basic replacement.",
+      "kind": "sourced",
+      "source_url": "https://homeguide.com/costs/average-plumbing-estimates",
+      "read_date": "2026-11-08",
+      "reviewed": true,
+      "borrowed_from": []
     },
     "water-softener": {
       "job_label": "Water softener installation",
@@ -192,7 +267,12 @@
       "source_title": "How Much Does Plumbing Repair Cost? [2026 Data]",
       "source_updated": "2026-10-14",
       "url": "https://www.angi.com/articles/plumber-cost.htm",
-      "quote": "Water Softener Installation $200–$500."
+      "quote": "Water Softener Installation $200–$500.",
+      "kind": "sourced",
+      "source_url": "https://www.angi.com/articles/plumber-cost.htm",
+      "read_date": "2026-11-08",
+      "reviewed": true,
+      "borrowed_from": []
     },
     "backflow": {
       "job_label": "Backflow testing",
@@ -204,7 +284,12 @@
       "source_title": "How Much Does Backflow Testing Cost? (2026)",
       "source_updated": "2024-09-30",
       "url": "https://homeguide.com/costs/backflow-testing-cost",
-      "quote": "Backflow testing costs $30 to $300 per device. The page's average range is $30 to $300."
+      "quote": "Backflow testing costs $30 to $300 per device. The page's average range is $30 to $300.",
+      "kind": "sourced",
+      "source_url": "https://homeguide.com/costs/backflow-testing-cost",
+      "read_date": "2026-11-08",
+      "reviewed": true,
+      "borrowed_from": []
     },
     "tankless-water-heater": {
       "job_label": "Tankless water heater descaling",
@@ -216,7 +301,12 @@
       "source_title": "How Much Does Water Heater Repair Cost? (2026)",
       "source_updated": "2025-08-07",
       "url": "https://homeguide.com/costs/water-heater-repair-cost",
-      "quote": "Flush and descale tankless costs $75 to $300. Tankless repairs on the same page are a separate $300 to $1,300 range and are not used here."
+      "quote": "Flush and descale tankless costs $75 to $300. Tankless repairs on the same page are a separate $300 to $1,300 range and are not used here.",
+      "kind": "sourced",
+      "source_url": "https://homeguide.com/costs/water-heater-repair-cost",
+      "read_date": "2026-11-08",
+      "reviewed": true,
+      "borrowed_from": []
     }
   }
 }

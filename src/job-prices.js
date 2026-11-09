@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { isStale } from "./price-model.js";
 
 const raw = JSON.parse(readFileSync(new URL("../data/job-prices.json", import.meta.url), "utf8"));
 
@@ -11,6 +12,10 @@ function assertRange(id, row) {
     throw new Error(`Job price ${id} needs a whole-dollar low and high.`);
   }
   if (!row.url.startsWith("https://")) throw new Error(`Job price ${id} needs an https source URL.`);
+  if (row.kind !== "sourced" || row.reviewed !== true) throw new Error(`Live price ${id} must be a reviewed sourced range.`);
+  if (row.source_url !== row.url || !row.read_date || !Array.isArray(row.borrowed_from)) {
+    throw new Error(`Live price ${id} is missing its source chain.`);
+  }
 }
 
 if (raw.accessed !== "2026-11-08") throw new Error("Job price access date must stay explicit.");
@@ -53,6 +58,7 @@ export function priceFor(subnicheId) {
     accessed: PRICE_ACCESS_DATE,
     sentence: `${row.job_label} runs ${formatDollars(row.low_dollars)}–${formatDollars(row.high_dollars)} ${unit}.`,
     source_line: `${row.source_name}. Accessed November 8, 2026. ${row.url}`,
+    stale: isStale(row.read_date, "2026-11-09"),
     note: "National United States range from the cited page. Not adjusted for a city."
   };
 }
