@@ -16,7 +16,11 @@ export function start() {
     console.error("PORT must be an integer from 0 to 65535.");
     process.exit(1);
   }
-  const server = createApp();
+  const configuredStore = process.env.RESULT_STORE_PATH;
+  const resultStorePath = configuredStore && configuredStore.trim()
+    ? configuredStore.trim()
+    : path.join(process.cwd(), "data", "result-cache.json");
+  const server = createApp({ resultStorePath });
   server.listen(listenPort, HOST, () => {
     console.log(`centik-niche-validator listening on ${HOST}:${listenPort}`);
   });

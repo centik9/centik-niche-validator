@@ -14,5 +14,7 @@ dist/
 coverage/
 tmp/
 data/spend-ledger.json
+data/result-cache.json
+data/result-cache.json.*
 *.pem
 *.key

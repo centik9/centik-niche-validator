@@ -58,17 +58,20 @@
             <li data-zone="High"><i style="background:#a3e635"></i>High</li>
             <li data-zone="Max"><i style="background:#34d399"></i>Max</li>
           </ul>
-          <p class="score-block"><span class="score num"><span id="num">—</span><small>/ 100</small></span><span id="chipwrap"></span></p>
+          <p class="score-block"><span class="score num"><span id="num">-</span><small>/ 100</small></span><span id="chipwrap"></span></p>
           <p class="verdict" id="verdict">The score appears after you pick a city.</p>
+          <p class="data-stamp" id="score-stamp" hidden></p>
+          <p class="saved-note" id="saved-note" hidden>Showing saved results. A rerun starts a new paid check.</p>
           <div class="bd" id="bd"></div>
           <p class="help demand-note" id="demand-note"></p>
         </div>
       </div>
     </section>
     <section class="card area-map" aria-labelledby="h-map">
-      <div class="card-h"><span class="step">Step 2</span><h2 id="h-map">Locations</h2><span class="sp"></span><span class="sample">Sample data</span></div>
+      <div class="card-h"><span class="step">Step 2</span><h2 id="h-map">Locations</h2><span class="sp"></span><span class="sample" id="map-pill">Sample data</span></div>
       <div id="mapwrap"></div>
       <p class="help">Stylized, not a real map. Glow shows sample demand.</p>
+      <p class="data-stamp" id="map-stamp" hidden></p>
       <ul class="locs" id="locs"></ul>
     </section>
     <section class="card area-est" id="est-card" hidden aria-labelledby="h-est">
@@ -77,10 +80,11 @@
     </section>
     <section class="card area-paid" aria-labelledby="h-paid">
       <div class="card-h"><span class="step">Step 4</span><h2 id="h-paid">Confirm paid check</h2><span class="sp"></span><span class="sample" id="paid-pill">Sample data</span></div>
-      <div class="warn" role="note"><span aria-hidden="true">!</span><span>This check costs money. Nothing runs until you press okay.</span></div>
+      <div class="warn" id="paid-warn" role="note"><span aria-hidden="true">!</span><span>This check costs money. Nothing runs until you press okay.</span></div>
       <dl class="kv" id="paid-kv"></dl>
       <ul class="call-list" id="paid-calls"></ul>
       <div class="budget"><div class="row"><span>Spend to date</span><b class="num" id="spent-label">$0.00</b></div><div class="track"><span id="budget-bar" style="width:0"></span></div></div>
+      <p class="data-stamp" id="paid-stamp" hidden></p>
       <div class="actions">
         <button class="btn pri" type="button" id="pay-go" disabled>Okay, run paid check</button>
         <button class="btn ghost" type="button" id="pay-cancel" disabled>Cancel</button>
@@ -100,6 +104,7 @@
   <p class="foot">Fixture numbers keep a Sample data pill. A paid check runs only after Okay.</p>
   <p class="sr" aria-live="polite" id="live"></p>
 </div>
+<div class="card-scrim" id="card-scrim" hidden></div>
 <script src="/dashboard.js"></script>
 </body>
 </html>

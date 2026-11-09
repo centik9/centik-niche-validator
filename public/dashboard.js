@@ -27,6 +27,37 @@ function quoteMoney(amount) {
   return `$${Number(amount).toFixed(3)}`;
 }
 
+function formatCapturedDate(iso) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Los_Angeles",
+    month: "short",
+    day: "numeric",
+    year: "numeric"
+  }).formatToParts(date);
+  const month = parts.find((part) => part.type === "month");
+  const day = parts.find((part) => part.type === "day");
+  const year = parts.find((part) => part.type === "year");
+  if (!month || !day || !year) return "";
+  return `${month.value} ${day.value}, ${year.value}`;
+}
+
+function formatDataStamp(iso, mapsDepth) {
+  const date = formatCapturedDate(iso);
+  if (!date) return "";
+  const depth = Number(mapsDepth);
+  if (Number.isInteger(depth) && depth > 0) return `Data from ${date} · ${depth} listings`;
+  return `Data from ${date}`;
+}
+
+function stampDepth(report) {
+  if (!report) return null;
+  if (Number.isInteger(report.maps_depth)) return report.maps_depth;
+  if (report.maps && Number.isInteger(report.maps.requested_depth)) return report.maps.requested_depth;
+  return null;
+}
+
 function metricText(metric) {
   if (!metric || metric.value == null || metric.status === "missing") return "Missing";
   if (metric.status === "failed") return "Failed";
@@ -56,6 +87,8 @@ const state = {
   location: null,
   proposal: null,
   quote: null,
+  storedReport: null,
+  rerunArmed: false,
   busy: false
 };
 
@@ -81,9 +114,9 @@ function paintStepper() {
     ["1. Service", state.subniche ? state.subniche.label : "Keyword"],
     ["2. Locations", state.location ? `${state.location.name}, ${state.location.state}` : "Pick a city"],
     ["3. Microsite", state.proposal ? "Sketch ready" : "After a city"],
-    ["4. Check", state.quote ? "Waiting for your okay" : "Not quoted"]
+    ["4. Check", state.rerunArmed ? "Confirm the charge" : state.storedReport ? "Saved result" : state.quote ? "Waiting for your okay" : "Not quoted"]
   ];
-  const current = state.quote ? 3 : state.proposal ? 2 : state.cards.length ? 1 : 0;
+  const current = state.quote || state.storedReport ? 3 : state.proposal ? 2 : state.cards.length ? 1 : 0;
   $("stepper").replaceChildren(...steps.map(([label, detail], index) => el("li", {
     class: index < current ? "done" : index === current ? "now" : ""
   }, [
@@ -120,7 +153,7 @@ function renderRows() {
         estimated ? el("span", { class: "note" }, [row.price && row.price.pending_review ? "Pending review. This cannot turn the row green." : "Estimate. Capped below a green row."]) : ""
       ]),
       el("div", {}, [
-        el("span", { class: "sc num" }, [score == null ? "—" : String(Math.round(score))]),
+        el("span", { class: "sc num" }, [score == null ? "-" : String(Math.round(score))]),
         el("span", { class: "zn" }, [zone ? zone.name : "Not scored"])
       ])
     );
@@ -192,7 +225,7 @@ function renderGauge(composite, title, note) {
   $("score-title").textContent = title;
   const score = composite && composite.status === "calculated" ? Number(composite.composite_display) : null;
   const zone = score == null ? null : zoneOf(score);
-  const display = score == null ? "—" : (composite.composite_display || String(Math.round(score)));
+  const display = score == null ? "-" : (composite.composite_display || String(Math.round(score)));
   const G = { cx: 180, cy: 168, R: 112 };
   const point = (value, radius) => {
     const angle = Math.PI * (1 - value / 100);
@@ -251,7 +284,7 @@ function renderGauge(composite, title, note) {
       el("div", { class: "bd-top" }, [
         el("span", { class: "n" }, [name]),
         el("span", { class: "w" }, [`× ${weight}`]),
-        el("span", { class: "p num" }, [points == null ? "—" : `${points} pts`])
+        el("span", { class: "p num" }, [points == null ? "-" : `${points} pts`])
       ]),
       (() => {
           const track = el("span", { class: "track" });
@@ -324,26 +357,36 @@ function renderSketch(proposal) {
 function renderQuote(quote, proposal) {
   const kv = $("paid-kv");
   kv.replaceChildren();
-  const rows = quote ? [
-    ["Niche", quote.niche],
-    ["Market", quote.market],
-    ["Calls", String(quote.calls.length)],
-    ["Cost", `$${Number(quote.estimated_cost_usd).toFixed(3)}`],
-    ["Budget left", `${money(quote.remaining_usd)} of ${money(quote.cap_usd)}`]
+  const stored = Boolean(state.storedReport);
+  const chargeCalls = stored
+    ? (state.rerunArmed && quote && quote.calls && quote.calls.length ? quote.calls : (quote && quote.rerun_calls) || [])
+    : (quote && quote.calls) || [];
+  const chargeCost = stored
+    ? (state.rerunArmed && quote ? quote.estimated_cost_usd : quote && quote.rerun_estimated_cost_usd)
+    : quote && quote.estimated_cost_usd;
+  const rows = quote || stored ? [
+    ["Niche", quote ? quote.niche : proposal ? proposal.subniche.label : "-"],
+    ["Market", quote ? quote.market : proposal ? `${proposal.location.name}, ${proposal.location.state}` : "-"],
+    ["Calls", chargeCalls.length ? String(chargeCalls.length) : "-"],
+    ["Cost", chargeCost == null ? "-" : quoteMoney(chargeCost)],
+    ["Budget left", quote ? `${money(quote.remaining_usd)} of ${money(quote.cap_usd)}` : "-"]
   ] : [
-    ["Niche", proposal ? proposal.subniche.label : "—"],
-    ["Market", proposal ? `${proposal.location.name}, ${proposal.location.state}` : "—"],
-    ["Calls", "—"],
-    ["Cost", "—"],
-    ["Budget left", "—"]
+    ["Niche", proposal ? proposal.subniche.label : "-"],
+    ["Market", proposal ? `${proposal.location.name}, ${proposal.location.state}` : "-"],
+    ["Calls", "-"],
+    ["Cost", "-"],
+    ["Budget left", "-"]
   ];
   rows.forEach(([name, value]) => {
-    kv.append(el("dt", {}, [name]), el("dd", { class: "num" }, [name === "Cost" && quote ? quoteMoney(quote.estimated_cost_usd) : value]));
+    const cost = name === "Cost" && chargeCost != null;
+    kv.append(el("dt", {}, [name]), el("dd", { class: "num" }, cost
+      ? [quoteMoney(chargeCost), " ", el("span", { class: "est-tag" }, ["EST."])]
+      : [value]));
   });
   const calls = $("paid-calls");
   if (calls) {
     calls.replaceChildren();
-    (quote && quote.calls ? quote.calls : []).forEach((call) => {
+    chargeCalls.forEach((call) => {
       calls.append(el("li", {}, [`${call.purpose}: ${quoteMoney(call.estimated_cost_usd)}`]));
     });
   }
@@ -351,15 +394,27 @@ function renderQuote(quote, proposal) {
   const used = quote ? quote.spent_usd : 0;
   $("spent-label").textContent = quote ? `${money(used)} of ${money(cap)}` : "$0.00";
   $("budget-bar").style.width = cap ? `${Math.min(100, (used / cap) * 100)}%` : "0";
-  $("pay-go").disabled = !quote || state.busy;
-  $("pay-cancel").disabled = !quote || state.busy;
-  const breakdown = quote && quote.calls && quote.calls.length
-    ? `${quote.calls.map((call) => `${call.purpose} ${quoteMoney(call.estimated_cost_usd)}`).join(". ")}. Total ${quoteMoney(quote.estimated_cost_usd)}. Location lists are free and are not in this cost.`
-    : "Google Ads search volume live $0.090. Maps live advanced, depth 100 $0.002. Google organic live, depth 10 $0.002. Google Trends explore live $0.011. Total $0.105.";
-  $("paid-note").textContent = quote && quote.cache_hit
-    ? "A saved result from the last 24 hours will be shown. It will not be billed again."
+  const go = $("pay-go");
+  go.textContent = stored ? "Rerun paid check" : "Okay, run paid check";
+  go.classList.toggle("money", stored);
+  go.classList.toggle("pri", !stored);
+  const ready = stored ? (!state.busy && (state.rerunArmed ? Boolean(quote) : Boolean(state.storedReport))) : Boolean(quote) && !state.busy;
+  go.disabled = !ready;
+  const showCancel = stored ? state.rerunArmed : Boolean(quote);
+  $("pay-cancel").hidden = !showCancel;
+  $("pay-cancel").disabled = !showCancel || state.busy;
+  $("paid-warn").hidden = stored && !state.rerunArmed;
+  const breakdown = chargeCalls.length
+    ? `${chargeCalls.map((call) => `${call.purpose} ${quoteMoney(call.estimated_cost_usd)}`).join(". ")}. Total ${quoteMoney(chargeCost)}. Location lists are free and are not in this cost.`
+    : "";
+  $("paid-note").textContent = stored
+    ? "This starts a new paid DataForSEO run and will be charged."
     : breakdown;
-  $("paid-pill").textContent = quote && !quote.live_mode ? "Live off" : "Quote";
+  const pill = $("paid-pill");
+  pill.textContent = stored ? "Cached" : quote && !quote.live_mode ? "Live off" : quote ? "Quote" : "Sample data";
+  pill.classList.toggle("cached", stored);
+  paintStamp();
+  paintStepper();
 }
 
 function renderResults(message, report) {
@@ -376,9 +431,9 @@ function renderResults(message, report) {
   const listings = report.city_market && report.city_market.unique_listings;
   const cpc = report.demand && report.demand.cpc;
   const tiles = [
-    ["Monthly searches", volume && volume.value != null ? String(volume.value) : "—", live ? "Live Google data" : "Example data"],
-    ["Map pack rivals", listings == null ? "—" : String(listings), live ? "Live Google data" : "Example data"],
-    ["Top ad bid", cpc && cpc.value != null ? money(cpc.value) : "—", live ? "Live Google data" : "Example data"]
+    ["Monthly searches", volume && volume.value != null ? String(volume.value) : "-", live ? "Live Google data" : "Example data"],
+    ["Map pack rivals", listings == null ? "-" : String(listings), live ? "Live Google data" : "Example data"],
+    ["Top ad bid", cpc && cpc.value != null ? money(cpc.value) : "-", live ? "Live Google data" : "Example data"]
   ];
   tiles.forEach(([label, value, note]) => {
     slot.append(el("div", { class: "res" }, [
@@ -413,7 +468,7 @@ function renderPhrasePanel(report) {
   const body = el("tbody");
   rows.forEach((row) => {
     body.append(el("tr", {}, [
-      el("td", {}, [row.keyword || "—"]),
+      el("td", {}, [row.keyword || "-"]),
       el("td", {}, [metricText(row.search_volume)]),
       el("td", {}, [row.cpc && row.cpc.value != null ? money(row.cpc.value) : metricText(row.cpc)]),
       el("td", {}, [row.paid_search_competition && row.paid_search_competition.value != null ? String(row.paid_search_competition.value) : metricText(row.paid_search_competition)]),
@@ -492,11 +547,86 @@ function renderSeasonality(report) {
   return panel;
 }
 
+function setStamp(id, text) {
+  const node = $(id);
+  if (!node) return;
+  node.hidden = !text;
+  node.textContent = text || "";
+}
+
+function paintStamp() {
+  const report = state.storedReport;
+  const text = report ? formatDataStamp(report.captured_at, stampDepth(report)) : "";
+  const onScore = Boolean(report && report.live_composite && text);
+  setStamp("score-stamp", onScore ? text : "");
+  setStamp("map-stamp", text);
+  setStamp("paid-stamp", text);
+  $("saved-note").hidden = !onScore;
+}
+
+function markCached(on, options = {}) {
+  const score = $("score-pill");
+  const map = $("map-pill");
+  const results = $("res-pill");
+  if (on) {
+    if (options.score !== false && score) {
+      score.textContent = "Cached";
+      score.classList.add("cached");
+    }
+    if (map) {
+      map.textContent = "Cached";
+      map.classList.add("cached");
+    }
+    if (results) {
+      results.textContent = "Cached";
+      results.classList.add("cached");
+    }
+    return;
+  }
+  if (score) {
+    score.textContent = "Sample data";
+    score.classList.remove("cached");
+  }
+  if (map) {
+    map.textContent = "Sample data";
+    map.classList.remove("cached");
+  }
+  if (results) results.classList.remove("cached");
+  const paid = $("paid-pill");
+  if (paid) paid.classList.remove("cached");
+}
+
+function showStored(report) {
+  state.storedReport = report;
+  state.rerunArmed = false;
+  const title = state.location && state.subniche
+    ? `${state.subniche.label} in ${state.location.name}, ${state.location.state}`
+    : "Saved result";
+  renderResults("", report);
+  if (report.live_composite) {
+    renderGauge(
+      report.live_composite,
+      title,
+      "Demand uses clustered coverage volume. Competition is the Maps sample. Organic directory share and Trends seasonality do not change those scores."
+    );
+  }
+  markCached(true, { score: Boolean(report.live_composite) });
+  paintStamp();
+}
+
+function clearStored() {
+  state.storedReport = null;
+  state.rerunArmed = false;
+  markCached(false);
+  paintStamp();
+}
+
 async function chooseSubniche(row) {
   state.subniche = row;
   state.location = null;
   state.proposal = null;
   state.quote = null;
+  clearStored();
   renderRows();
   const shortlist = await post("/api/microsite", { action: "shortlist", keyword: state.keyword, subniche_id: row.id });
   state.cards = shortlist.cards || [];
@@ -509,6 +639,7 @@ async function chooseSubniche(row) {
 async function chooseLocation(card) {
   if (card.geography_type !== "city") return;
   state.location = card;
+  clearStored();
   renderMap();
   state.proposal = await post("/api/microsite", {
     action: "proposal",
@@ -527,15 +658,9 @@ async function chooseLocation(card) {
   try {
     const resolved = await post("/api/resolve", { mode: "example", city: card.name, state: card.state, country: "United States" });
     const side = (match) => match ? { location_code: match.location_code, location_name: match.location_name, location_type: match.location_type } : null;
-    state.quote = await post("/api/quote", {
-      niche: state.subniche.label,
-      city: card.name,
-      state: card.state,
-      country: "United States",
-      geography_type: "city",
-      confirmed: { google_ads: side(resolved.google_ads.match), google_maps: side(resolved.google_maps.match) }
-    });
     state.confirmed = { google_ads: side(resolved.google_ads.match), google_maps: side(resolved.google_maps.match) };
+    state.quote = await post("/api/quote", quoteBody());
+    if (state.quote.cache_hit && state.quote.cached_report) showStored(state.quote.cached_report);
   } catch (error) {
     state.quote = null;
     state.quoteError = error.message;
@@ -545,24 +670,57 @@ async function chooseLocation(card) {
   paintStepper();
 }
 
-async function runPaid() {
-  if (!state.quote || !state.location || state.busy) return;
+function quoteBody(rerun) {
+  return {
+    niche: state.subniche.label,
+    city: state.location.name,
+    state: state.location.state,
+    country: "United States",
+    geography_type: "city",
+    confirmed: state.confirmed,
+    rerun: rerun === true
+  };
+}
+
+async function armRerun() {
   state.busy = true;
   $("pay-go").disabled = true;
-  $("paid-note").textContent = "Confirming the paid check…";
+  let failed = "";
   try {
-    const quoted = await post("/api/quote", {
-      niche: state.subniche.label,
-      city: state.location.name,
-      state: state.location.state,
-      country: "United States",
-      geography_type: "city",
-      confirmed: state.confirmed
-    });
+    const quoted = await post("/api/quote", quoteBody(true));
     state.quote = quoted;
+    state.rerunArmed = true;
+    $("live").textContent = "Confirm the rerun. Nothing has been sent yet.";
+  } catch (error) {
+    state.rerunArmed = false;
+    failed = error.message;
+  } finally {
+    state.busy = false;
+    renderQuote(state.quote, state.proposal);
+    if (failed) $("paid-note").textContent = failed;
+  }
+}
+
+async function runPaid() {
+  if (!state.location || state.busy) return;
+  if (state.storedReport && !state.rerunArmed) {
+    await armRerun();
+    return;
+  }
+  if (!state.quote) return;
+  const rerun = Boolean(state.storedReport);
+  state.busy = true;
+  $("pay-go").disabled = true;
+  $("paid-note").textContent = rerun ? "Confirming the rerun…" : "Confirming the paid check…";
+  let failed = "";
+  try {
+    const quoted = await post("/api/quote", quoteBody(rerun));
+    state.quote = quoted;
+    state.rerunArmed = rerun;
     renderQuote(quoted, state.proposal);
     const report = await post("/api/validate", {
       mode: "live",
+      rerun,
       spend_token: quoted.spend_token,
       margin_index: state.proposal.composite && state.proposal.composite.margin ? state.proposal.composite.margin.index : undefined,
       margin_estimated: Boolean(state.proposal.composite && state.proposal.composite.estimated),
@@ -573,22 +731,15 @@ async function runPaid() {
       geography_type: "city",
       confirmed: state.confirmed
     });
-    renderResults("", report);
-    if (report.live_composite) {
-      renderGauge(
-        report.live_composite,
-        `${state.subniche.label} in ${state.location.name}, ${state.location.state}`,
-        "Demand uses clustered coverage volume. Competition is the Maps sample. Organic directory share and Trends seasonality do not change those scores."
-      );
-      $("score-pill").textContent = "Live Google data";
-    }
-    $("paid-note").textContent = "The paid check finished. A repeat of this niche and market within 24 hours is not billed again.";
+    showStored(report);
+    state.quote = await post("/api/quote", quoteBody(false));
   } catch (error) {
-    renderResults(error.message);
-    $("paid-note").textContent = error.message;
+    failed = error.message;
+    if (!state.storedReport) renderResults(error.message);
   } finally {
     state.busy = false;
-    $("pay-go").disabled = !state.quote;
+    renderQuote(state.quote, state.proposal);
+    if (failed) $("paid-note").textContent = failed;
   }
 }
 
@@ -648,9 +799,17 @@ $("keyword").addEventListener("input", () => {
 
 $("pay-go").addEventListener("click", runPaid);
 $("pay-cancel").addEventListener("click", () => {
+  if (state.rerunArmed) {
+    state.rerunArmed = false;
+    renderQuote(state.quote, state.proposal);
+    $("live").textContent = "Canceled. Nothing was sent.";
+    paintStepper();
+    return;
+  }
   state.quote = null;
   state.location = null;
   state.proposal = null;
+  clearStored();
   renderQuote(null, null);
   renderSketch(null);
   renderMap();
@@ -666,6 +825,126 @@ fetch("/health").then((response) => response.json()).then((health) => {
   $("server-status").querySelector("span").textContent = "LIVE MODE OFF";
 });
 
+function enlargeIcon(path) {
+  const node = svg("svg", { viewBox: "0 0 24 24", width: "16", height: "16", "aria-hidden": "true", focusable: "false" });
+  svg("path", {
+    d: path,
+    fill: "none",
+    stroke: "currentColor",
+    "stroke-width": "1.8",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round"
+  }, node);
+  return node;
+}
+
+let enlargedCard = null;
+let enlargeTimer = 0;
+
+function focusable(root) {
+  return [...root.querySelectorAll("a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled])")]
+    .filter((node) => !node.hidden && node.getAttribute("aria-hidden") !== "true");
+}
+
+function closeEnlarged() {
+  if (!enlargedCard) return;
+  const card = enlargedCard;
+  const open = card.querySelector(".enlarge");
+  const close = card.querySelector(".enlarge-close");
+  card.classList.remove("is-enlarged");
+  card.removeAttribute("role");
+  card.removeAttribute("aria-modal");
+  if (close) close.hidden = true;
+  if (open) {
+    open.hidden = false;
+    open.setAttribute("aria-expanded", "false");
+  }
+  const scrim = $("card-scrim");
+  scrim.classList.remove("open");
+  document.body.classList.remove("card-focus");
+  enlargedCard = null;
+  window.clearTimeout(enlargeTimer);
+  enlargeTimer = window.setTimeout(() => {
+    if (!enlargedCard) scrim.hidden = true;
+  }, 200);
+  if (open) {
+    try {
+      open.focus({ focusVisible: true });
+    } catch {
+      open.focus();
+    }
+  }
+}
+
+function openEnlarged(card) {
+  if (enlargedCard && enlargedCard !== card) closeEnlarged();
+  const scrim = $("card-scrim");
+  const open = card.querySelector(".enlarge");
+  const close = card.querySelector(".enlarge-close");
+  window.clearTimeout(enlargeTimer);
+  scrim.hidden = false;
+  document.body.classList.add("card-focus");
+  card.classList.add("is-enlarged");
+  card.setAttribute("role", "dialog");
+  card.setAttribute("aria-modal", "true");
+  if (open) {
+    open.hidden = true;
+    open.setAttribute("aria-expanded", "true");
+  }
+  if (close) close.hidden = false;
+  enlargedCard = card;
+  requestAnimationFrame(() => {
+    if (enlargedCard === card) scrim.classList.add("open");
+  });
+  if (close) close.focus();
+}
+
+function installEnlarge() {
+  const scrim = $("card-scrim");
+  if (!scrim) return;
+  scrim.addEventListener("click", () => closeEnlarged());
+  document.querySelectorAll("#grid .card").forEach((card) => {
+    const head = card.querySelector(".card-h");
+    const title = card.querySelector("h2");
+    if (!head || !title || head.querySelector(".enlarge")) return;
+    const name = title.textContent.trim();
+    const open = el("button", {
+      class: "enlarge",
+      type: "button",
+      "aria-label": `Enlarge ${name}`,
+      "aria-expanded": "false"
+    });
+    open.append(enlargeIcon("M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"));
+    const close = el("button", { class: "enlarge-close", type: "button", hidden: "" });
+    close.append(enlargeIcon("M6 6l12 12M18 6L6 18"), document.createTextNode("Close"));
+    open.addEventListener("click", () => openEnlarged(card));
+    close.addEventListener("click", () => closeEnlarged());
+    head.append(open, close);
+  });
+  document.addEventListener("keydown", (event) => {
+    if (!enlargedCard) return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeEnlarged();
+      return;
+    }
+    if (event.key !== "Tab") return;
+    const nodes = focusable(enlargedCard);
+    if (!nodes.length) return;
+    const first = nodes[0];
+    const last = nodes[nodes.length - 1];
+    const active = document.activeElement;
+    if (event.shiftKey && (active === first || !enlargedCard.contains(active))) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && (active === last || !enlargedCard.contains(active))) {
+      event.preventDefault();
+      first.focus();
+    }
+  });
+}
+
+installEnlarge();
 paintStepper();
 renderQuote(null, null);
 renderSketch(null);
