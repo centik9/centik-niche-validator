@@ -538,7 +538,7 @@ function renderGate() {
   const slot = $("deep-slot");
   slot.replaceChildren();
   slot.append(el("p", { class: "notice" }, [liveReady
-    ? "Live mode is on. This check is $0.105: $0.09 for Google Ads search volume, $0.002 for Maps depth 100, $0.002 for organic depth 10, and $0.011 for Google Trends. A repeated query within 24 hours is not charged again."
+    ? "Live mode is on. This check is $0.105: $0.09 for Google Ads search volume, $0.002 for Maps depth 100, $0.002 for organic depth 10, and $0.011 for Google Trends. A saved result for the same niche and city is not charged again until you rerun the paid check."
     : "Paid DataForSEO check is off. Yes did not authorize spending."]));
   slot.append(el("p", {}, [gate.reason]));
   if (!gate.example_check_available) {

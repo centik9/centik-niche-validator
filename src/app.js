@@ -30,7 +30,8 @@ const PUBLIC_FILES = new Map([
   ["/index.html", { file: "index.html", type: "text/html; charset=utf-8" }],
   ["/app.js", { file: "app.js", type: "text/javascript; charset=utf-8" }],
   ["/flow.js", { file: "flow.js", type: "text/javascript; charset=utf-8" }],
-  ["/styles.css", { file: "styles.css", type: "text/css; charset=utf-8" }]
+  ["/styles.css", { file: "styles.css", type: "text/css; charset=utf-8" }],
+  ["/us-heat-map.js", { file: "us-heat-map.js", type: "text/javascript; charset=utf-8" }]
 ]);
 
 function spendRefusal(reason) {
@@ -127,6 +128,8 @@ export function createApp(options = {}) {
   const spend = createSpendGate({
     capUsd: numberEnv(env.SPEND_CAP_USD, 10),
     ledgerPath: options.ledgerPath || env.SPEND_LEDGER_PATH || path.join(process.cwd(), "data", "spend-ledger.json"),
+    resultStore: options.resultStore,
+    resultStorePath: options.resultStorePath || "",
     tokenSecret: env.SPEND_TOKEN_SECRET || "",
     baselineUsd: options.baselineUsd !== undefined ? options.baselineUsd : baselineUsd(env),
     readAccountSpent: options.readAccountSpent || (async () => {
@@ -350,7 +353,10 @@ export function createApp(options = {}) {
       }
       const prepared = parseValidateInput(json);
       try {
-        const quoted = await spend.quote(session.email, prepared, { requireAccount: liveEnabled(env) });
+        const quoted = await spend.quote(session.email, prepared, {
+          requireAccount: liveEnabled(env),
+          rerun: json.rerun === true
+        });
         send(res, 200, { ...quoted, live_mode: liveEnabled(env), credentials_configured: credentialsReady(env) });
       } catch (error) {
         if (error && error.status) {
@@ -401,7 +407,10 @@ export function createApp(options = {}) {
     }
     const prepared = pathname === "/api/resolve" ? parseResolveInput(json) : parseValidateInput(json);
     if (pathname === "/api/validate" && prepared.mode === "live") {
-      const decision = await spend.accept(json.spend_token, session.email, prepared, { requireAccount: liveEnabled(env) });
+      const decision = await spend.accept(json.spend_token, session.email, prepared, {
+        requireAccount: liveEnabled(env),
+        rerun: json.rerun === true
+      });
       if (!decision.ok) {
         send(res, 403, {
           error: SPEND_BLOCKS.has(decision.reason) ? decision.reason : "spend_not_confirmed",
@@ -433,16 +442,26 @@ export function createApp(options = {}) {
         rejectRate(res, globalDecision);
         return;
       }
-      const cached = spend.freshResult(decision.bind);
-      if (cached) {
-        send(res, 200, cached);
-        return;
+      if (!decision.rerun) {
+        const cached = await spend.freshResult(decision.bind);
+        if (cached) {
+          send(res, 200, cached);
+          return;
+        }
       }
       const report = await (options.validateImpl || validateNiche)(prepared, depsFor("live"));
       const sent = Boolean(report.demand && report.demand.sent_to_dataforseo) || Boolean(report.maps && report.maps.sent_to_dataforseo);
       if (sent) await spend.record(report, session.email, prepared);
       if (report.demand && report.demand.status !== "failed" && report.maps && report.maps.status !== "failed") {
-        spend.remember(decision.bind, report);
+        try {
+          const saved = await spend.remember(decision.bind, report);
+          send(res, 200, saved);
+          return;
+        } catch (error) {
+          logger.error(redact(error && (error.stack || error.message) || "result cache write failed"));
+          report.captured_at = new Date(now()).toISOString();
+          report.maps_depth = report.maps && Number.isInteger(report.maps.requested_depth) ? report.maps.requested_depth : null;
+        }
       }
       send(res, 200, report);
       return;

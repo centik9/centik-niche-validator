@@ -152,7 +152,7 @@ test("Trends location falls back from city to metro, state, then national", () =
   assert.equal(selectTrendsLocation([], query).level, "unavailable");
 });
 
-test("the result cache key cannot replay a volume-only or depth-20 check", () => {
+test("the result cache key cannot replay a volume-only or depth-20 check", async () => {
   const bind = bindSpendRequest("Team@Centik.ai", {
     niche: "Emergency Plumber",
     city: "Austin",
@@ -171,9 +171,9 @@ test("the result cache key cannot replay a volume-only or depth-20 check", () =>
   assert.match(key, /packed-commercial-v1/);
   assert.notEqual(key, `${bind.niche}|${bind.google_ads}|${bind.google_maps}`);
   const gate = createSpendGate({ tokenSecret: "x".repeat(32), now: () => 1_700_000_000_000, baselineUsd: 0, readAccountSpent: async () => 0 });
-  gate.remember(bind, { marker: "new-check" });
-  assert.equal(gate.freshResult(bind).marker, "new-check");
-  assert.equal(gate.freshResult({ ...bind, niche: "other" }), null);
+  await gate.remember(bind, { marker: "new-check" });
+  assert.equal((await gate.freshResult(bind)).marker, "new-check");
+  assert.equal(await gate.freshResult({ ...bind, niche: "other" }), null);
 });
 
 test("the paid quote is exactly 0.105 across four calls", () => {

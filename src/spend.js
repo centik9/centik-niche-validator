@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { MAPS_PATH, ORGANIC_PATH, SEARCH_VOLUME_PATH, TRENDS_PATH } from "./config.js";
+import { openResultStore } from "./result-store.js";
 import { VOLUME_KEYWORD_SET_ID } from "./volume-keywords.js";
 
 export const ADS_COST_USD = 0.09;
@@ -13,7 +14,7 @@ export const MAPS_LIVE_DEPTH = 100;
 export const ORGANIC_LIVE_DEPTH = 10;
 export const RESULT_CACHE_VERSION = "microsite-v2";
 export const TOKEN_MS = 5 * 60 * 1000;
-export const RESULT_CACHE_MS = 24 * 60 * 60 * 1000;
+const TRENDS_CACHE_ID = "trends-explore-12m";
 const SCALE = 1000;
 
 function milli(dollars) {
@@ -74,7 +75,7 @@ export function paidCalls() {
   ];
 }
 
-export function bindSpendRequest(email, prepared) {
+export function bindSpendRequest(email, prepared, flags = {}) {
   const ads = prepared.confirmed && prepared.confirmed.google_ads;
   const maps = prepared.confirmed && prepared.confirmed.google_maps;
   return {
@@ -85,7 +86,8 @@ export function bindSpendRequest(email, prepared) {
     country: String(prepared.countryCanonical || prepared.country || "").trim().toLowerCase(),
     geography_type: prepared.geography_type || "city",
     google_ads: ads ? ads.location_code : null,
-    google_maps: maps ? maps.location_code : null
+    google_maps: maps ? maps.location_code : null,
+    rerun: flags.rerun === true
   };
 }
 
@@ -93,18 +95,33 @@ function sameBind(left, right) {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
+export function resultIdentity(bind) {
+  return {
+    version: RESULT_CACHE_VERSION,
+    organic_depth: ORGANIC_LIVE_DEPTH,
+    trends: TRENDS_CACHE_ID,
+    volume_keyword_set_id: VOLUME_KEYWORD_SET_ID,
+    niche: bind.niche,
+    city: bind.city,
+    state: bind.state,
+    google_ads: bind.google_ads,
+    google_maps: bind.google_maps
+  };
+}
+
 export function resultCacheKey(bind) {
+  const identity = resultIdentity(bind);
   return [
-    RESULT_CACHE_VERSION,
+    identity.version,
     `maps${MAPS_LIVE_DEPTH}`,
-    "organic10",
-    "trends-explore-12m",
-    VOLUME_KEYWORD_SET_ID,
-    bind.niche,
-    bind.city,
-    bind.state,
-    bind.google_ads,
-    bind.google_maps
+    `organic${identity.organic_depth}`,
+    identity.trends,
+    identity.volume_keyword_set_id,
+    identity.niche,
+    identity.city,
+    identity.state,
+    identity.google_ads,
+    identity.google_maps
   ].join("|");
 }
 
@@ -120,13 +137,17 @@ export function createSpendGate(options = {}) {
     throw error;
   });
   const entries = [];
-  const results = new Map();
   const used = new Set();
+  const store = openResultStore({
+    store: options.resultStore,
+    filePath: options.resultStore ? "" : (options.resultStorePath || "")
+  });
 
   let ready = null;
   function load() {
     if (!ready) {
       ready = (async () => {
+        await store.load();
         if (!ledgerPath) return;
         try {
           const saved = JSON.parse(await fs.readFile(ledgerPath, "utf8"));
@@ -242,8 +263,8 @@ export function createSpendGate(options = {}) {
       error.status = 503;
       throw error;
     }
-    const bind = bindSpendRequest(email, prepared);
-    const hit = freshResult(bind);
+    const bind = bindSpendRequest(email, prepared, { rerun: flags.rerun === true });
+    const hit = bind.rerun ? null : await freshResult(bind);
     const cost = hit ? 0 : QUERY_COST_USD;
     const account = flags.requireAccount ? await accountPosition(cost) : null;
     const signed = signToken(bind);
@@ -251,6 +272,12 @@ export function createSpendGate(options = {}) {
     return {
       calls: hit ? [] : paidCalls(),
       cache_hit: Boolean(hit),
+      rerun: bind.rerun,
+      captured_at: hit ? hit.captured_at : null,
+      maps_depth: hit ? hit.maps_depth : null,
+      cached_report: hit,
+      rerun_estimated_cost_usd: QUERY_COST_USD,
+      rerun_calls: paidCalls(),
       estimated_cost_usd: cost,
       spent_usd: account ? account.spent_usd : state.spent_usd,
       remaining_usd: account ? account.remaining_usd : state.remaining_usd,
@@ -265,17 +292,24 @@ export function createSpendGate(options = {}) {
     };
   }
 
-  function inspect(token, email, prepared) {
+  async function inspect(token, email, prepared, flags = {}) {
     const parsed = readToken(token);
     if (!parsed.ok) return parsed;
-    const bind = bindSpendRequest(email, prepared);
+    const bind = bindSpendRequest(email, prepared, { rerun: flags.rerun === true });
     if (!sameBind(parsed.body.bind, bind)) return { ok: false, reason: "mismatched" };
-    const hit = freshResult(bind);
-    return { ok: true, bind, nonce: parsed.body.nonce, cache_hit: Boolean(hit), estimated_cost_usd: hit ? 0 : QUERY_COST_USD };
+    const hit = bind.rerun ? null : await freshResult(bind);
+    return {
+      ok: true,
+      bind,
+      nonce: parsed.body.nonce,
+      cache_hit: Boolean(hit),
+      rerun: bind.rerun,
+      estimated_cost_usd: hit ? 0 : QUERY_COST_USD
+    };
   }
 
   async function accept(token, email, prepared, flags = {}) {
-    const parsed = inspect(token, email, prepared);
+    const parsed = await inspect(token, email, prepared, flags);
     if (!parsed.ok) return parsed;
     if (flags.requireAccount) {
       try {
@@ -289,14 +323,34 @@ export function createSpendGate(options = {}) {
     return parsed;
   }
 
-  function freshResult(bind) {
-    const hit = results.get(resultCacheKey(bind));
-    if (!hit || hit.expires <= now()) return null;
-    return hit.value;
+  function present(hit) {
+    const report = structuredClone(hit.report);
+    report.captured_at = hit.captured_at;
+    report.maps_depth = hit.maps_depth;
+    return report;
   }
 
-  function remember(bind, value) {
-    results.set(resultCacheKey(bind), { expires: now() + RESULT_CACHE_MS, value });
+  async function freshResult(bind) {
+    await load();
+    const hit = store.find(resultIdentity(bind), MAPS_LIVE_DEPTH);
+    return hit ? present(hit) : null;
+  }
+
+  async function remember(bind, value) {
+    await load();
+    const captured_at = new Date(now()).toISOString();
+    const reportedDepth = value && value.maps && Number.isInteger(value.maps.requested_depth) ? value.maps.requested_depth : null;
+    const maps_depth = reportedDepth > 0 ? reportedDepth : MAPS_LIVE_DEPTH;
+    const report = structuredClone(value);
+    report.captured_at = captured_at;
+    report.maps_depth = maps_depth;
+    await store.save({
+      ...resultIdentity(bind),
+      maps_depth,
+      captured_at,
+      report
+    });
+    return structuredClone(report);
   }
 
   function reportedCost(field, fallback) {
