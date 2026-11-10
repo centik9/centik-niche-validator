@@ -6,6 +6,7 @@ function el(tag, attrs = {}, kids = []) {
   for (const [key, value] of Object.entries(attrs)) {
     if (value == null) continue;
     if (key === "class") node.className = value;
+    else if (key === "style") node.style.cssText = value;
     else node.setAttribute(key, value);
   }
   for (const kid of kids) node.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
@@ -89,7 +90,8 @@ const state = {
   quote: null,
   storedReport: null,
   rerunArmed: false,
-  busy: false
+  busy: false,
+  mapRegion: null
 };
 
 let suggestTimer = 0;
@@ -113,7 +115,12 @@ function paintStepper() {
   const steps = [
     ["1. Service", state.subniche ? state.subniche.label : "Keyword"],
     ["2. Locations", state.location ? `${state.location.name}, ${state.location.state}` : "Pick a city"],
-    ["3. Microsite", (state.proposal && ((state.proposal.pages && state.proposal.pages.length) || state.proposal.suggested_domain)) ? "Sketch ready" : (state.location ? "No sketch yet" : "After a city")],
+    ["3. Market score", (() => {
+      const composite = state.location && state.proposal && state.proposal.composite;
+      const score = composite && composite.status === "calculated" ? composite.composite_display : null;
+      if (score != null && score !== "") return String(score);
+      return state.location ? "No score yet" : "After a city";
+    })()],
     ["4. Check", state.rerunArmed ? "Confirm the charge" : state.storedReport ? "Saved result" : state.quote ? "Waiting for your okay" : "Not quoted"]
   ];
   const current = state.quote || state.storedReport ? 3 : state.proposal ? 2 : state.cards.length ? 1 : 0;
@@ -162,7 +169,7 @@ function renderRows() {
   });
 }
 
-const ZONE_HEX = { No: "#f87171", Low: "#fb923c", Medium: "#fbbf24", High: "#a3e635", Max: "#34d399" };
+const ZONE_HEX = { No: "#ff6b6b", Low: "#ffa94d", Medium: "#ffd166", High: "#a3e635", Max: "#34d399" };
 
 function zoneColor(zone) {
   return zone ? ZONE_HEX[zone.name] : "#94a3b8";
@@ -172,53 +179,282 @@ function cityPool() {
   return [...state.cards, ...(state.nearbyCards || [])];
 }
 
-function shownCities() {
-  const cities = cityPool().filter((card) => card.geography_type === "city");
-  if (!state.location) return state.cards.filter((card) => card.geography_type === "city").slice(0, 5);
-  const ids = state.location.nearby_ids && state.location.nearby_ids.length ? state.location.nearby_ids : [state.location.id];
-  return ids
-    .map((id) => cities.find((card) => card.id === id))
-    .filter(Boolean)
-    .sort((a, b) => b.example_relative_demand - a.example_relative_demand);
+// ---- Step 2 map: United States heat map with click-to-zoom regions. ----
+// Shapes come from /us-heat-map.js (us-atlas + Census boundaries). Heat is
+// sample demand: server example_relative_demand for cities the example set can
+// score, and a fixture base tilted by the niche for heat-only areas.
+const USMAP = window.US_HEAT_MAP || null;
+const HEAT = [
+  { min: 75, cls: 4, color: "#ff4d4f", word: "Hottest" },
+  { min: 60, cls: 3, color: "#ff9f43", word: "Hot" },
+  { min: 45, cls: 2, color: "#ffd43b", word: "Warm" },
+  { min: -1, cls: 1, color: "#7b8494", word: "Coldest" }
+];
+const heatOf = (value) => HEAT.find((band) => Number(value) >= band.min);
+
+function hashTilt(text) {
+  let h = 2166136261;
+  for (const ch of text) h = Math.imul(h ^ ch.charCodeAt(0), 16777619);
+  return ((h >>> 0) % 25) - 12;
 }
 
-function renderMap() {
-  const cities = shownCities();
-  const wrap = $("mapwrap");
-  wrap.replaceChildren();
-  const map = svg("svg", { viewBox: "0 0 360 210", class: "map", role: "img", "aria-label": "Stylized map of the example cities. Not a real map." });
-  svg("path", { d: "M40 60 C 90 40, 150 45, 210 52 S 310 70, 330 110 S 300 180, 230 186 S 90 190, 50 160 S 10 90, 40 60 Z", fill: "rgba(167,139,250,.05)", stroke: "#a78bfa", "stroke-opacity": ".45", "stroke-dasharray": "4 5" }, map);
-  const spots = [[70, 92], [150, 104], [214, 96], [226, 150], [158, 156]];
-  cities.forEach((card, index) => {
-    const [x, y] = spots[index] || [40 + (index % 5) * 60, 40 + Math.floor(index / 5) * 70];
-    const selected = state.location && state.location.id === card.id;
-    const group = svg("g", { transform: `translate(${x} ${y})` }, map);
-    svg("circle", { r: selected ? 6 : 4.5, fill: selected ? "#f4f8fc" : "#22d3ee" }, group);
-    const label = svg("text", {
-      x: index % 2 === 0 ? 12 : -12,
-      y: index % 2 === 0 ? -12 : 18,
-      "text-anchor": index % 2 === 0 ? "start" : "end",
-      "font-size": selected ? 14 : 12.5,
-      "font-weight": selected ? 700 : 600,
-      fill: selected ? "#f1f5f9" : "#cbd5e1",
-      stroke: "#07090d",
-      "stroke-width": 3.5,
-      "paint-order": "stroke"
-    }, group);
-    label.textContent = card.name;
+function serverCard(id) {
+  return id ? cityPool().find((card) => card.id === id && card.geography_type === "city") : null;
+}
+
+function cityHeat(region, city) {
+  const card = serverCard(city.id);
+  if (card) return card.example_relative_demand;
+  const base = city.base != null ? city.base : region.base;
+  if (!state.subniche) return base;
+  return Math.max(8, Math.min(96, base + hashTilt(`${state.subniche.id}|${region.id}|${city.name}`)));
+}
+
+function regionHeat(region) {
+  const values = region.cities.map((city) => serverCard(city.id) ? serverCard(city.id).example_relative_demand : null).filter((v) => v != null);
+  if (values.length) return Math.max(...values);
+  if (!state.subniche) return region.base;
+  return Math.max(8, Math.min(96, region.base + hashTilt(`${state.subniche.id}|${region.id}`)));
+}
+
+function regionForCity(id) {
+  if (!USMAP || !id) return null;
+  return Object.values(USMAP.regions).find((region) => region.cities.some((city) => city.id === id)) || null;
+}
+
+function heatDefs(map) {
+  const defs = svg("defs", {}, map);
+  const glow = svg("filter", { id: "heatglow", x: "-80%", y: "-80%", width: "260%", height: "260%" }, defs);
+  svg("feGaussianBlur", { stdDeviation: "3", result: "b" }, glow);
+  svg("feMerge", {}, glow).append(svg("feMergeNode", { in: "b" }), svg("feMergeNode", { in: "SourceGraphic" }));
+  const soft = svg("filter", { id: "heatsoft", x: "-50%", y: "-50%", width: "200%", height: "200%" }, defs);
+  svg("feGaussianBlur", { stdDeviation: "8" }, soft);
+  HEAT.forEach((band) => {
+    const grad = svg("radialGradient", { id: `heatarea${band.cls}` }, defs);
+    svg("stop", { offset: "0%", "stop-color": band.color, "stop-opacity": "0.7" }, grad);
+    svg("stop", { offset: "55%", "stop-color": band.color, "stop-opacity": "0.28" }, grad);
+    svg("stop", { offset: "100%", "stop-color": band.color, "stop-opacity": "0" }, grad);
+  });
+}
+
+function haloText(parent, attrs, text) {
+  const node = svg("text", Object.assign({
+    fill: "#eef2f7", stroke: "#06080c", "stroke-width": 4, "stroke-linejoin": "round",
+    "paint-order": "stroke", "font-family": "IBM Plex Sans, system-ui, sans-serif"
+  }, attrs), parent);
+  node.textContent = text;
+  return node;
+}
+
+// Pick a label side so nearby labels do not stack on each other.
+function labelSpot(placed, x, y) {
+  const clash = (lx, ly) => placed.some((p) => Math.abs(p[0] - lx) < 130 && Math.abs(p[1] - ly) < 30);
+  const options = [[x + 14, y - 12, "start"], [x - 14, y - 12, "end"], [x + 14, y + 26, "start"], [x - 14, y + 26, "end"]];
+  const pick = options.find(([lx, ly, anchor]) => !clash(anchor === "end" ? lx - 110 : lx, ly)) || options[0];
+  placed.push([pick[2] === "end" ? pick[0] - 110 : pick[0], pick[1]]);
+  return pick;
+}
+
+function activate(node, fn) {
+  node.addEventListener("click", fn);
+  node.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") { event.preventDefault(); fn(); }
+  });
+}
+
+function nicheLabel() {
+  return state.subniche ? state.subniche.label : "";
+}
+
+function renderMapBar() {
+  const bar = $("map-bar");
+  bar.replaceChildren();
+  const region = state.mapRegion && USMAP ? USMAP.regions[state.mapRegion] : null;
+  if (region) {
+    const back = el("button", { class: "map-back", type: "button" }, ["← United States"]);
+    back.addEventListener("click", () => { state.mapRegion = null; renderMap(); });
+    bar.append(back, el("span", {}, [
+      el("span", { class: "where" }, [`${region.title}, ${region.state}`]),
+      el("span", { class: "sub" }, [` · ${nicheLabel() || "pick a sub-niche"} · city and county heat`])
+    ]));
+  } else {
+    bar.append(el("span", {}, [
+      el("span", { class: "where" }, ["United States"]),
+      el("span", { class: "sub" }, [nicheLabel() ? ` · where ${nicheLabel().toLowerCase()} sample demand runs hottest` : " · pick a sub-niche to see its heat"])
+    ]));
+  }
+}
+
+function zoomTo(regionId) {
+  const region = USMAP && USMAP.regions[regionId];
+  if (!region) return;
+  const map = $("mapwrap").querySelector("svg.map");
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (!map || reduce || state.mapRegion) {
+    state.mapRegion = regionId;
+    renderMap();
+    return;
+  }
+  const [cx, cy] = region.national;
+  const to = [cx - 60, cy - 37.5, 120, 75];
+  const from = [0, 0, 960, 600];
+  const started = performance.now();
+  const step = (now) => {
+    const t = Math.min(1, (now - started) / 380);
+    const e = 1 - (1 - t) ** 3;
+    map.setAttribute("viewBox", from.map((v, i) => (v + (to[i] - v) * e).toFixed(1)).join(" "));
+    if (t < 1) requestAnimationFrame(step);
+    else { state.mapRegion = regionId; renderMap(); }
+  };
+  requestAnimationFrame(step);
+}
+
+function renderNational(wrap) {
+  const map = svg("svg", { viewBox: "0 0 960 600", class: "map", role: "group", "aria-label": `United States heat map with Alaska, Hawaii, and Puerto Rico shown up top. ${nicheLabel() ? `Sample demand for ${nicheLabel()}.` : "Pick a sub-niche to see its heat."} Stylized, not a street map.` });
+  heatDefs(map);
+  const base = svg("g", {}, map);
+  USMAP.national.states.forEach((st) => {
+    const p = svg("path", { d: st.d, fill: "#141b26", stroke: "rgba(255,255,255,.16)", "stroke-width": ".7" }, base);
+    svg("title", {}, p).textContent = st.name;
+  });
+  USMAP.national.insets.forEach((box) => {
+    svg("rect", { x: box.x, y: box.y, width: box.w, height: box.h, rx: 8, fill: "none", stroke: "rgba(255,255,255,.12)", "stroke-dasharray": "3 4" }, map);
+    haloText(map, { x: box.x + 6, y: box.y + box.h - 6, "font-size": 11, fill: "#8c98ab", "stroke-width": 3 }, box.label);
+  });
+  const regions = Object.values(USMAP.regions).map((region) => ({ region, heat: regionHeat(region) }))
+    .sort((a, b) => a.heat - b.heat);
+  const areas = svg("g", { "pointer-events": "none" }, map);
+  const dots = svg("g", {}, map);
+  const labels = svg("g", { "pointer-events": "none" }, map);
+  const top = new Set(regions.slice(-6).map((item) => item.region.id));
+  const selRegion = state.location ? regionForCity(state.location.id) : null;
+  const placedN = [];
+  regions.slice().reverse().forEach(({ region, heat }) => {
+    const band = heatOf(heat);
+    const [x, y] = region.national;
+    const active = Boolean(state.subniche);
+    const r = active ? 10 + heat / 3.2 : 12;
+    svg("circle", { cx: x, cy: y, r, fill: `url(#heatarea${active ? band.cls : 1})` }, areas);
+    const hit = svg("g", { class: "hit", tabindex: "0", role: "button", "aria-label": `${region.title}, ${region.state}. ${active ? `${band.word} sample demand, ${heat}.` : "No niche picked yet."} Zoom in.` }, dots);
+    svg("circle", { cx: x, cy: y, r: 14, fill: "transparent" }, hit);
+    svg("circle", { class: "ring", cx: x, cy: y, r: 7, fill: "none", stroke: active ? band.color : "#7b8494", "stroke-opacity": ".55", "stroke-width": 1.5 }, hit);
+    svg("circle", { cx: x, cy: y, r: active ? 4 : 3, fill: active ? band.color : "#7b8494", filter: "url(#heatglow)" }, hit);
+    svg("title", {}, hit).textContent = `${region.title}, ${region.state}${active ? ` · sample heat ${heat}` : ""} · click to zoom`;
+    activate(hit, () => zoomTo(region.id));
+    if ((active && top.has(region.id)) || (selRegion && selRegion.id === region.id)) {
+      const [lx, ly, anchor] = labelSpot(placedN, x, y);
+      haloText(labels, { x: lx, y: ly + 4, "text-anchor": anchor, "font-size": 13, "font-weight": 650 }, region.title);
+    }
   });
   wrap.append(map);
   const list = $("locs");
   list.replaceChildren();
-  cities.forEach((card, index) => {
-    const item = el("li", { class: state.location && state.location.id === card.id ? "sel" : "" }, [
-      el("b", {}, [`${index + 1}. ${card.name}, ${card.state}`]),
-      el("span", { class: "d num" }, [String(card.example_relative_demand)]),
-      el("small", {}, [`Sample demand ${card.example_relative_demand}. Not a live search count.`])
+  if (!state.subniche) {
+    list.append(el("li", { class: "off" }, [el("span", {}, ["Pick a sub-niche in Step 1. The map then heats up where its sample demand runs hottest."])]));
+    return;
+  }
+  regions.slice().reverse().slice(0, 6).forEach(({ region, heat }, index) => {
+    const band = heatOf(heat);
+    const item = el("li", { tabindex: "0" }, [
+      el("b", {}, [el("i", { class: `hd h${band.cls}` }), `${index + 1}. ${region.title}, ${region.state}`, region.scored ? "" : el("span", { class: "tag" }, ["Heat only"])]),
+      el("span", { class: "d num" }, [String(heat)]),
+      el("small", {}, [`${band.word} sample demand. Click to zoom in.`])
     ]);
-    item.addEventListener("click", () => chooseLocation(card));
+    activate(item, () => zoomTo(region.id));
     list.append(item);
   });
+}
+
+function renderRegion(wrap, region) {
+  const map = svg("svg", { viewBox: "0 0 960 600", class: "map", role: "group", "aria-label": `${region.title}, ${region.state}. City and county sample heat for ${nicheLabel() || "no niche yet"}. Stylized, not a street map.` });
+  heatDefs(map);
+  const cities = region.cities.map((city) => ({ city, heat: cityHeat(region, city), card: serverCard(city.id) }));
+  const heatByName = new Map(cities.map((item) => [item.city.name, item.heat]));
+  const counties = svg("g", {}, map);
+  region.counties.forEach((county) => {
+    const hot = county.cities.map((name) => heatByName.get(name)).filter((v) => v != null);
+    const band = hot.length ? heatOf(Math.max(...hot)) : null;
+    const p = svg("path", { d: county.d, fill: band ? band.color : "#141b26", "fill-opacity": band ? ".12" : "1", stroke: "rgba(255,255,255,.18)", "stroke-width": "1" }, counties);
+    svg("title", {}, p).textContent = `${county.name} County${band ? ` · ${band.word.toLowerCase()} sample heat` : ""}`;
+  });
+  if (region.stateLines) svg("path", { d: region.stateLines, fill: "none", stroke: "rgba(255,255,255,.4)", "stroke-width": "1.6", "stroke-dasharray": "6 4" }, map);
+  const places = svg("g", {}, map);
+  const placeLabels = [];
+  region.places.filter((place) => !place.city).forEach((place) => {
+    const p = svg("path", { d: place.d, fill: "rgba(255,255,255,.03)", stroke: "rgba(255,255,255,.12)", "stroke-width": ".8" }, places);
+    svg("title", {}, p).textContent = `${place.name} · no sample heat`;
+    if (place.big && place.cx > 40 && place.cx < 920 && place.cy > 30 && place.cy < 580) placeLabels.push(place);
+  });
+  const areas = svg("g", {}, map);
+  const pins = svg("g", {}, map);
+  const labels = svg("g", { "pointer-events": "none" }, map);
+  region.counties.forEach((county) => {
+    if (county.cx > 30 && county.cx < 930 && county.cy > 30 && county.cy < 570) {
+      haloText(labels, { x: county.cx, y: county.cy, "text-anchor": "middle", "font-size": 12, fill: "#8c98ab", "stroke-width": 3 }, `${county.name} Co.`);
+    }
+  });
+  const placed = cities.map(({ city }) => [city.x - 10, city.y]);
+  const spots = new Map();
+  cities.slice().sort((a, b) => b.heat - a.heat).forEach(({ city }) => {
+    const others = placed.filter((p) => p[0] !== city.x - 10 || p[1] !== city.y);
+    spots.set(city.name, labelSpot(others, city.x, city.y));
+    placed.push(...others.slice(-1));
+  });
+  cities.slice().sort((a, b) => a.heat - b.heat).forEach(({ city, heat, card }) => {
+    const band = heatOf(heat);
+    const selected = state.location && state.location.id === city.id;
+    region.places.filter((place) => place.city === city.name).forEach((place) => {
+      const area = svg("path", { d: place.d, fill: band.color, "fill-opacity": selected ? ".6" : ".42", stroke: selected ? "#ffffff" : band.color, "stroke-width": selected ? "2" : "1.4", filter: "url(#heatglow)", class: card ? "hit" : "" }, areas);
+      svg("title", {}, area).textContent = `${city.name} · sample heat ${heat}${card ? " · click to select" : ""}`;
+      if (card) area.addEventListener("click", () => chooseLocation(card));
+    });
+    svg("circle", { cx: city.x, cy: city.y, r: 26 + heat / 4, fill: `url(#heatarea${band.cls})`, "pointer-events": "none" }, areas);
+    const hit = svg("g", { class: card ? "hit" : "", tabindex: card ? "0" : "-1", role: card ? "button" : "img", "aria-label": `${city.name}. ${band.word} sample demand, ${heat}.${card ? (selected ? " Selected." : " Select this city.") : " Heat only, not in the example scoring set."}` }, pins);
+    svg("circle", { cx: city.x, cy: city.y, r: 20, fill: "transparent" }, hit);
+    svg("circle", { class: "ring", cx: city.x, cy: city.y, r: selected ? 13 : 10, fill: "none", stroke: selected ? "#ffffff" : band.color, "stroke-opacity": selected ? "1" : ".6", "stroke-width": selected ? 2.5 : 1.5 }, hit);
+    svg("circle", { cx: city.x, cy: city.y, r: selected ? 7 : 6, fill: band.color, filter: "url(#heatglow)" }, hit);
+    svg("title", {}, hit).textContent = `${city.name} · sample heat ${heat}${card ? " · click to select" : " · heat only"}`;
+    if (card) activate(hit, () => chooseLocation(card));
+    const [lx, ly, anchor] = spots.get(city.name) || [city.x + 14, city.y - 12, "start"];
+    haloText(labels, { x: lx, y: ly, "text-anchor": anchor, "font-size": selected ? 19 : 17, "font-weight": selected ? 750 : 650 }, city.name);
+    haloText(labels, { x: lx, y: ly + 18, "text-anchor": anchor, "font-size": 13, fill: band.color, "font-weight": 650, "stroke-width": 3.5 }, `${heat} · ${band.word.toLowerCase()}`);
+  });
+  placeLabels.forEach((place) => {
+    haloText(labels, { x: place.cx, y: place.cy, "text-anchor": "middle", "font-size": 11, fill: "#8c98ab", "stroke-width": 3 }, place.name);
+  });
+  wrap.append(map);
+  const list = $("locs");
+  list.replaceChildren();
+  cities.slice().sort((a, b) => b.heat - a.heat).forEach(({ city, heat, card }, index) => {
+    const band = heatOf(heat);
+    const selected = state.location && state.location.id === city.id;
+    const item = el("li", { class: `${selected ? "sel" : ""}${card ? "" : " off"}`, tabindex: card ? "0" : "-1" }, [
+      el("b", {}, [el("i", { class: `hd h${band.cls}` }), `${index + 1}. ${city.name}`, card ? "" : el("span", { class: "tag" }, ["Heat only"])]),
+      el("span", { class: "d num" }, [String(heat)]),
+      el("small", {}, [card
+        ? `${band.word} sample demand. ${selected ? "Selected for Step 3." : "Click to pick this city."}`
+        : `${band.word} sample heat. Not in the example scoring set, so no score.`])
+    ]);
+    if (card) activate(item, () => chooseLocation(card));
+    list.append(item);
+  });
+  if (!state.subniche) list.prepend(el("li", { class: "off" }, [el("span", {}, ["Pick a sub-niche in Step 1 to score a city here."])]));
+}
+
+function renderMap() {
+  const wrap = $("mapwrap");
+  wrap.replaceChildren();
+  renderMapBar();
+  if (!USMAP) {
+    wrap.append(el("p", { class: "help" }, ["The map file did not load. Refresh the page."]));
+    return;
+  }
+  const region = state.mapRegion ? USMAP.regions[state.mapRegion] : null;
+  if (region) renderRegion(wrap, region);
+  else renderNational(wrap);
+  $("map-cap").textContent = region
+    ? "Stylized city and county heat map. Heat is sample demand, not a live street map. Click a city to pick it."
+    : "Stylized United States heat map. Heat is sample demand, not a live street map. Click a hot area to zoom in.";
 }
 
 function renderGauge(composite, title, note) {
@@ -307,33 +543,520 @@ function renderGauge(composite, title, note) {
   if (score != null) playReveal(score, display);
 }
 
-function renderEstimates(proposal) {
-  const card = $("est-card");
+/* lead-conversion-rates-start */
+const LeadConversion = (() => {
+// Lead conversion rates for the Niche Validator estimates box (Phase 1).
+// Seeded LocaliQ / WordStream 2025 figures are median ad click-to-lead CVRs.
+// They are applied when a niche maps cleanly, and the UI must say so.
+// They are not search-to-lead rates. Do not treat unmapped niches as 38-52 of 2,900.
+//
+// Phase 2 (deferred): on-demand research for niches with no studied rate.
+// Do not invent a ballpark here.
+// Phase 3 (deferred): usage-triggered refresh about once a month
+// (REFRESH_INTERVAL_DAYS = 30) when a user opens the tool and the estimates
+// box resolves that niche. No background timers, cron, intervals, or idle jobs.
+
+const LOCALIQ_BLOG_URL = "https://localiq.com/blog/home-services-search-advertising-benchmarks/";
+const LOCALIQ_PDF_URL = "https://www.wordstream.com/wp-content/uploads/2025/06/ws-guide-home-services-benchmarks-2025.pdf";
+const LOCALIQ_YEAR = 2025;
+const LOCALIQ_COVERAGE = "3,211 US campaigns, Apr 1 2024-Mar 21 2025";
+
+// Documented historical reference from the estimates mock. Phase 1 does not
+// apply this to any niche. Unmapped niches show a looking-up state instead.
+const DEFAULT_LEAD_CONVERSION = {
+  low: 38 / 2900,
+  mid: 45 / 2900,
+  high: 52 / 2900,
+  status: "default",
+  source: "Validator estimates reference: 38 to 52 leads from 2,900 monthly searches.",
+  notes: "Phase 1 does not apply this default. Niches without a studied rate show a looking-up state instead of inventing a number."
+};
+
+const LOCALIQ_NOTE = "LocaliQ / WordStream 2025 Home Services Search Ads Benchmarks median click-to-lead CVR (share of ad clicks that become a lead or sale), not search-volume-to-lead. " + LOCALIQ_COVERAGE + ". Cite the LocaliQ blog table.";
+
+const PLUMBING_SUBNICHE_IDS = [
+  "emergency-plumbing",
+  "drain-cleaning",
+  "water-heater-repair",
+  "leak-detection",
+  "toilet-repair",
+  "faucet-repair",
+  "sewer-line",
+  "garbage-disposal",
+  "pipe-repair",
+  "sump-pump",
+  "bath-remodel-plumbing",
+  "kitchen-sink",
+  "water-filtration",
+  "gas-line",
+  "hydro-jetting",
+  "repipe",
+  "hose-bib",
+  "water-softener",
+  "backflow",
+  "tankless-water-heater"
+];
+
+const PLUMBING_ALIASES = [
+  "plumbing",
+  ...PLUMBING_SUBNICHE_IDS,
+  "emergency plumbing",
+  "drain cleaning",
+  "water heater repair",
+  "leak detection",
+  "toilet repair",
+  "faucet and fixture repair",
+  "faucet repair",
+  "sewer line service",
+  "sewer line",
+  "garbage disposal service",
+  "garbage disposal",
+  "pipe repair",
+  "sump pump service",
+  "sump pump",
+  "bathroom remodel plumbing",
+  "bath remodel plumbing",
+  "kitchen sink service",
+  "kitchen sink",
+  "water filtration install",
+  "water filtration",
+  "gas line plumbing",
+  "gas line",
+  "hydro jetting",
+  "repipe consultation",
+  "repipe",
+  "outdoor faucet service",
+  "hose bib",
+  "water softener service",
+  "water softener",
+  "backflow testing",
+  "backflow",
+  "tankless water heater service",
+  "tankless water heater"
+];
+
+function localiqRow({
+  id,
+  category_label,
+  cvr_percent,
+  aliases = [],
+  applied = true,
+  notes = LOCALIQ_NOTE
+}) {
+  return {
+    id,
+    category_label,
+    aliases,
+    metric_type: "click_to_lead",
+    cvr_percent,
+    low: cvr_percent / 100,
+    mid: cvr_percent / 100,
+    high: cvr_percent / 100,
+    source: LOCALIQ_BLOG_URL,
+    source_pdf: LOCALIQ_PDF_URL,
+    year: LOCALIQ_YEAR,
+    applied,
+    notes
+  };
+}
+
+const RESEARCHED_RATES = [
+  localiqRow({
+    id: "plumbing",
+    category_label: "plumbing",
+    cvr_percent: 7.63,
+    aliases: PLUMBING_ALIASES,
+    notes: LOCALIQ_NOTE + " Plumbing 7.63% is on the LocaliQ blog table. The PDF body only printed category highs and lows, not this mid-table value."
+  }),
+  localiqRow({
+    id: "hvac",
+    category_label: "HVAC",
+    cvr_percent: 7.02,
+    aliases: [
+      "hvac",
+      "hvac repair",
+      "heating",
+      "heating and furnaces",
+      "furnace",
+      "furnaces",
+      "ac",
+      "air conditioning",
+      "air conditioning installation and repair",
+      "heat pump"
+    ],
+    notes: LOCALIQ_NOTE + " Mixed HVAC uses the midpoint of Air Conditioning Installation & Repair 6.56% and Heating & Furnaces 7.48%, which is 7.02%."
+  }),
+  localiqRow({
+    id: "electrician",
+    category_label: "electricians",
+    cvr_percent: 9.08,
+    aliases: [
+      "electrician",
+      "electricians",
+      "electrical",
+      "electricians and electrical contractors",
+      "electrical contractors"
+    ]
+  }),
+  localiqRow({
+    id: "cleaning",
+    category_label: "cleaning",
+    cvr_percent: 17.65,
+    aliases: [
+      "cleaning",
+      "maid",
+      "butler",
+      "house cleaning",
+      "maid service",
+      "cleaning maid butler services"
+    ]
+  }),
+  localiqRow({
+    id: "roofing",
+    category_label: "roofing",
+    cvr_percent: 3.70,
+    aliases: ["roofing", "roof", "gutters", "roofing and gutters", "gutter"]
+  }),
+  localiqRow({
+    id: "handyman",
+    category_label: "handyman services",
+    cvr_percent: 13.45,
+    aliases: ["handyman", "handyman services"]
+  }),
+  localiqRow({
+    id: "painting",
+    category_label: "painting",
+    cvr_percent: 10.80,
+    aliases: ["painting", "paint", "painter", "paint and painting"]
+  }),
+  localiqRow({
+    id: "landscaping",
+    category_label: "landscaping",
+    cvr_percent: 6.42,
+    aliases: ["landscaping", "landscape", "landscaper"]
+  }),
+  localiqRow({
+    id: "window-cleaning",
+    category_label: "window cleaning",
+    cvr_percent: 13.58,
+    aliases: ["window-cleaning", "window cleaning"]
+  }),
+  localiqRow({
+    id: "pools",
+    category_label: "pools and spas",
+    cvr_percent: 10.89,
+    aliases: ["pools", "spas", "pool", "spa", "pools and spas"]
+  }),
+  localiqRow({
+    id: "doors-windows",
+    category_label: "doors and windows",
+    cvr_percent: 4.41,
+    aliases: ["doors-windows", "doors and windows", "doors and windows sales", "window sales", "door sales"]
+  }),
+  localiqRow({
+    id: "construction",
+    category_label: "construction",
+    cvr_percent: 2.61,
+    aliases: [
+      "construction",
+      "contractor",
+      "general contractor",
+      "construction and contractors",
+      "construction and contractors general"
+    ]
+  }),
+  localiqRow({
+    id: "blinds",
+    category_label: "blinds and window treatments",
+    cvr_percent: 6.00,
+    aliases: ["blinds", "window treatments", "blinds and window treatments"]
+  }),
+  localiqRow({
+    id: "storage",
+    category_label: "storage",
+    cvr_percent: 4.65,
+    aliases: ["storage"]
+  }),
+  // Stored for documentation only. Do not map LocaliQ "Garages" 5.66% to garage-door repair.
+  localiqRow({
+    id: "garages",
+    category_label: "garages",
+    cvr_percent: 5.66,
+    aliases: ["garages"],
+    applied: false,
+    notes: LOCALIQ_NOTE + " Not applied. Do not map this category to garage-door repair."
+  }),
+  localiqRow({
+    id: "home-services-average",
+    category_label: "home services",
+    cvr_percent: 7.33,
+    aliases: [],
+    applied: false,
+    notes: LOCALIQ_NOTE + " Home services average or median 7.33%. Not applied as a catch-all for unknown niches."
+  })
+];
+
+function normalizeNicheKey(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function rowKeys(row) {
+  return new Set(
+    [row.id, row.category_label, ...(row.aliases || [])]
+      .map(normalizeNicheKey)
+      .filter(Boolean)
+  );
+}
+
+function findResearchedRate(nicheId, nicheLabel, rates = RESEARCHED_RATES) {
+  const idKey = normalizeNicheKey(nicheId);
+  const labelKey = normalizeNicheKey(nicheLabel);
+  for (const row of rates) {
+    const keys = rowKeys(row);
+    if (idKey && keys.has(idKey)) return row;
+    if (labelKey && keys.has(labelKey)) return row;
+  }
+  return null;
+}
+
+function lookingUp(nicheId, nicheLabel) {
+  const label = String(nicheLabel || "").trim() || String(nicheId || "").trim().replace(/-/g, " ") || "this service";
+  return {
+    status: "looking_up",
+    metric_type: null,
+    cvr_percent: null,
+    low: null,
+    mid: null,
+    high: null,
+    source: null,
+    year: null,
+    category_id: null,
+    category_label: null,
+    niche_id: nicheId || null,
+    niche_label: label,
+    applied: false,
+    notes: "No studied rate in the seeded table yet. Phase 2 will research a ballpark. Do not invent a number."
+  };
+}
+
+function resolveLeadConversion(nicheId, nicheLabel, options = {}) {
+  const table = options.rates || RESEARCHED_RATES;
+  const row = findResearchedRate(nicheId, nicheLabel, table);
+  if (!row || row.applied !== true) return lookingUp(nicheId, nicheLabel);
+  return {
+    status: "applied",
+    metric_type: row.metric_type,
+    cvr_percent: row.cvr_percent,
+    low: row.low,
+    mid: row.mid,
+    high: row.high,
+    source: row.source,
+    year: row.year,
+    category_id: row.id,
+    category_label: row.category_label,
+    niche_id: nicheId || row.id,
+    niche_label: String(nicheLabel || "").trim() || row.category_label,
+    applied: true,
+    notes: row.notes
+  };
+}
+
+function leadRangeFromConversion(searches, resolved) {
+  if (!Number.isFinite(searches) || searches <= 0) return null;
+  if (!resolved || resolved.status !== "applied") return null;
+  if (!Number.isFinite(resolved.low) || !Number.isFinite(resolved.high) || !Number.isFinite(resolved.mid)) return null;
+  const conv = (rate) => Math.max(1, Math.round(searches * rate));
+  return {
+    low: conv(resolved.low),
+    high: conv(resolved.high),
+    mid: conv(resolved.mid)
+  };
+}
+
+function conversionFlagCopy(resolved) {
+  if (resolved && resolved.status === "applied") {
+    const label = resolved.category_label || resolved.niche_label || "this service";
+    return `These leads use a published ad click-to-lead rate for ${label}. That is the share of ad clicks that become a lead, not the share of all Google searches.`;
+  }
+  const label = (resolved && resolved.niche_label) || "this service";
+  return `Looking up a conversion rate for ${label}. We don't have a studied rate yet.`;
+}
+
+  return {
+    DEFAULT_LEAD_CONVERSION,
+    RESEARCHED_RATES,
+    resolveLeadConversion,
+    leadRangeFromConversion,
+    conversionFlagCopy,
+    findResearchedRate,
+    normalizeNicheKey
+  };
+})();
+/* lead-conversion-rates-end */
+
+// Estimates box. Locked to the Ai Video Bootcamp abel-refs-v2 mock and
+// direction.md item 9. Every figure here is derived, so it keeps EST.
+// EST_REF_MID still scales the sample year chart. The 38-52 of 2,900
+// default is not applied in Phase 1; mapped niches use seeded rates.
+const EST_REF_SEARCHES = 2900;
+const EST_REF_LOW = 38;
+const EST_REF_HIGH = 52;
+const EST_REF_MID = 45;
+const SAMPLE_CLOSE_RATE = 1.0;
+const EST_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const EST_MID = [36, 38, 41, 44, 48, 52, 55, 53, 49, 45, 42, 40];
+const EST_SPAN = [6, 6, 7, 7, 8, 9, 9, 9, 8, 7, 7, 6];
+
+function shortMoney(amount) {
+  const value = Number(amount);
+  if (!Number.isFinite(value)) return "-";
+  if (value >= 1e6) return `$${(value / 1e6).toFixed(1)}M`;
+  if (value >= 1000) return `$${(value / 1000).toFixed(1)}k`;
+  return `$${Math.round(value).toLocaleString("en-US")}`;
+}
+
+function realCheck(report) {
+  return Boolean(report && report.example_data === false);
+}
+
+function checkVolume(report) {
+  const volume = report && report.demand && report.demand.search_volume;
+  return volume && Number.isFinite(volume.value) ? volume.value : null;
+}
+
+
+function averageJob(price) {
+  if (!price || price.status !== "published") return null;
+  if (price.pending_review || price.estimated) return null;
+  if (!Number.isInteger(price.low_dollars) || !Number.isInteger(price.high_dollars)) return null;
+  return Math.round((price.low_dollars + price.high_dollars) / 2);
+}
+
+function estKpi(label, value, caption, extraClass) {
+  return el("div", { class: extraClass ? `kpi ${extraClass}` : "kpi" }, [
+    el("div", { class: "l" }, [label, " ", el("span", { class: "est-tag" }, ["EST."])]),
+    el("div", { class: "v num" }, [value]),
+    el("div", { class: "s" }, [caption])
+  ]);
+}
+
+function niceStep(range) {
+  const rough = Math.max(1, range / 5);
+  const mag = 10 ** Math.floor(Math.log10(rough));
+  const unit = [1, 2, 5, 10].find((m) => m * mag >= rough) || 10;
+  return Math.max(1, unit * mag);
+}
+
+function renderEstChart(leads) {
+  const wrap = $("chartwrap");
+  wrap.replaceChildren();
+  $("est-legend").hidden = !leads;
+  if (!leads) return;
+  const factor = leads.mid / EST_REF_MID;
+  const mids = EST_MID.map((v) => v * factor);
+  const spans = EST_SPAN.map((v) => v * factor);
+  const lowest = Math.min(...mids.map((v, i) => v - spans[i]));
+  const highest = Math.max(...mids.map((v, i) => v + spans[i]));
+  const step = niceStep(highest - lowest);
+  const yMin = Math.max(0, Math.floor(lowest / step) * step);
+  const yMax = Math.ceil((highest + (highest - lowest) * 0.35) / step) * step;
+  const narrow = matchMedia("(max-width: 640px)").matches;
+  const CH = narrow ? { w: 360, h: 200, l: 34, r: 8, t: 14, b: 26 } : { w: 640, h: 190, l: 40, r: 10, t: 14, b: 26 };
+  const cx = (i) => CH.l + ((CH.w - CH.l - CH.r) * i) / 11;
+  const cy = (v) => CH.t + (CH.h - CH.t - CH.b) * (1 - (v - yMin) / (yMax - yMin));
+  const peakValue = Math.round(mids[6]);
+  const chart = svg("svg", {
+    viewBox: `0 0 ${CH.w} ${CH.h}`,
+    class: "chart",
+    role: "img",
+    "aria-label": `Estimated leads a month over a sample year, from about ${Math.round(mids[0])} in January to a peak near ${peakValue} in July. Sample estimate only, not a forecast or live data.`
+  });
+  const defs = svg("defs", {}, chart);
+  const grad = svg("linearGradient", { id: "est-chart-area", x1: 0, y1: 0, x2: 0, y2: 1 }, defs);
+  svg("stop", { offset: "0", "stop-color": "#22d3ee", "stop-opacity": ".35" }, grad);
+  svg("stop", { offset: "1", "stop-color": "#22d3ee", "stop-opacity": "0" }, grad);
+  for (let v = yMin; v <= yMax + 1e-9; v += step) {
+    svg("line", { x1: CH.l, x2: CH.w - CH.r, y1: cy(v), y2: cy(v), stroke: "#fff", "stroke-opacity": ".06" }, chart);
+    svg("text", { x: CH.l - 8, y: cy(v) + 4, "text-anchor": "end", "font-size": 11, fill: "#a9b4c6" }, chart).textContent = String(Math.round(v));
+  }
+  EST_MONTHS.forEach((m, i) => {
+    if (!narrow || i % 2 === 0) svg("text", { x: cx(i), y: CH.h - 6, "text-anchor": "middle", "font-size": 11, fill: "#a9b4c6" }, chart).textContent = m;
+  });
+  const smooth = (pts) => pts.map((p, i) => {
+    if (!i) return `M${p[0]} ${p[1]}`;
+    const q = pts[i - 1];
+    const mx = (q[0] + p[0]) / 2;
+    return `C${mx} ${q[1]} ${mx} ${p[1]} ${p[0]} ${p[1]}`;
+  }).join(" ");
+  const hi = mids.map((v, i) => [cx(i), cy(v + spans[i])]);
+  const lo = mids.map((v, i) => [cx(i), cy(Math.max(yMin, v - spans[i]))]).reverse();
+  const mid = mids.map((v, i) => [cx(i), cy(v)]);
+  const group = svg("g", { class: "est-reveal" }, chart);
+  svg("path", { d: `${smooth(mid)} L${cx(11)} ${cy(yMin)} L${cx(0)} ${cy(yMin)} Z`, fill: "url(#est-chart-area)" }, group);
+  svg("path", { d: `${smooth(hi)} L${lo.map((p) => p.join(" ")).join(" L")} Z`, fill: "#a78bfa", "fill-opacity": ".16" }, group);
+  svg("path", { d: smooth(mid), fill: "none", stroke: "#22d3ee", "stroke-width": 2.5, "stroke-dasharray": "7 5", "stroke-linecap": "round" }, group);
+  const peak = svg("g", { class: "est-peak" }, chart);
+  const label = `Jul, about ${peakValue}`;
+  const boxW = Math.max(104, label.length * 7.6 + 16);
+  svg("circle", { cx: cx(6), cy: cy(mids[6]), r: 5, fill: "#f4f8fc", stroke: "#22d3ee", "stroke-width": 2 }, peak);
+  svg("rect", { x: cx(6) - boxW / 2, y: cy(mids[6]) - 40, width: boxW, height: 28, rx: 8, fill: "#0b1018", stroke: "rgba(255,255,255,.14)" }, peak);
+  svg("text", { x: cx(6), y: cy(mids[6]) - 21, "text-anchor": "middle", "font-size": 12.5, "font-weight": 700, fill: "#eef2f7" }, peak).textContent = label;
+  wrap.append(chart);
+}
+
+function renderEstimates(proposal, report = state.storedReport) {
   const kpis = $("kpis");
   kpis.replaceChildren();
-  const searches = proposal && proposal.composite && proposal.composite.demand && proposal.composite.demand.monthly_searches;
-  const price = proposal && proposal.price;
-  const hasPrice = price && price.status === "published" && Number.isInteger(price.low_dollars);
-  if (!searches && !hasPrice) {
-    card.hidden = true;
+  const pill = $("est-pill");
+  const fromCheck = realCheck(report) && checkVolume(report) != null;
+  const sampleSearches = proposal && proposal.composite && proposal.composite.demand && proposal.composite.demand.monthly_searches;
+  const searches = fromCheck ? checkVolume(report) : (Number.isFinite(sampleSearches) ? sampleSearches : null);
+  if (!proposal || !state.location) {
+    pill.textContent = "Sample data";
+    kpis.append(el("p", { class: "help est-empty" }, ["Estimates appear after you pick a city."]));
+    const note = $("est-rate-note");
+    if (note) {
+      note.hidden = true;
+      note.textContent = "";
+    }
+    renderEstChart(null);
     return;
   }
-  card.hidden = false;
-  $("est-pill").textContent = proposal.example_data ? "Sample data" : "Live Google data";
-  if (Number.isFinite(searches)) {
-    kpis.append(el("div", { class: "kpi" }, [
-      el("div", { class: "l" }, ["Leads a month ", el("span", { class: "est-tag" }, ["EST."])]),
-      el("div", { class: "v num" }, [String(searches)]),
-      el("div", { class: "s" }, ["Example monthly searches from the fixture. Not live volume."])
-    ]));
+  pill.textContent = fromCheck ? "From last check" : "Sample data";
+  const subniche = proposal.subniche || {};
+  const resolved = LeadConversion.resolveLeadConversion(subniche.id, subniche.label);
+  const leads = LeadConversion.leadRangeFromConversion(searches, resolved);
+  const avg = averageJob(proposal.price);
+  const hasVolume = Number.isFinite(searches) && searches > 0;
+  const looking = resolved.status === "looking_up";
+  const leadCaption = leads
+    ? (fromCheck ? "From last check search volume" : "From sample search volume")
+    : (looking && hasVolume ? "No studied rate yet" : "Needs search volume");
+  const leadValue = !leads ? "-" : (leads.low === leads.high ? String(leads.low) : `${leads.low} to ${leads.high}`);
+  kpis.append(estKpi("Leads a month", leadValue, leadCaption));
+  if (leads && avg != null) {
+    const low = leads.low * SAMPLE_CLOSE_RATE * avg;
+    const high = leads.high * SAMPLE_CLOSE_RATE * avg;
+    kpis.append(estKpi("Revenue a month", `${shortMoney(low)} to ${shortMoney(high)}`, "Leads × close rate × job price", "rev"));
+  } else {
+    const revenueCaption = avg == null
+      ? "Needs a published national job price"
+      : (looking && hasVolume ? "No studied rate yet" : "Needs search volume");
+    kpis.append(estKpi("Revenue a month", "-", revenueCaption, "rev"));
   }
-  if (hasPrice) {
-    kpis.append(el("div", { class: "kpi" }, [
-      el("div", { class: "l" }, [price.pending_review || price.estimated ? "Job range " : "Job range", price.pending_review || price.estimated ? el("span", { class: "est-tag" }, ["EST."]) : ""]),
-      el("div", { class: "v num" }, [`$${price.low_dollars.toLocaleString("en-US")} to $${price.high_dollars.toLocaleString("en-US")}`]),
-      el("div", { class: "s" }, [price.pending_review ? "Pending review. This cannot make the row green." : (price.sentence || "National range.")])
-    ]));
+  kpis.append(estKpi("Average job", avg == null ? "-" : `$${avg.toLocaleString("en-US")}`, avg == null ? "Needs a published national job price" : "National range, not city adjusted"));
+  const note = $("est-rate-note");
+  if (note) {
+    note.hidden = false;
+    note.textContent = LeadConversion.conversionFlagCopy(resolved);
   }
+  renderEstChart(leads);
 }
 
 function renderSketch(proposal) {
@@ -430,35 +1153,72 @@ function renderQuote(quote, proposal) {
   paintStepper();
 }
 
+const RES_SPARKS = {
+  searches: { stroke: "#22d3ee", points: "0,26 15,24 30,25 45,18 60,20 75,13 90,15 105,9 120,7" },
+  rivals: { stroke: "#a78bfa", points: "0,12 15,14 30,13 45,16 60,15 75,18 90,17 105,20 120,19" },
+  bid: { stroke: "#f472b6", dash: "5 4", points: "0,22 15,20 30,21 45,17 60,18 75,14 90,16 105,12 120,11" }
+};
+
+function resTile(label, value, caption, spark, est) {
+  const line = svg("svg", { class: "spark", preserveAspectRatio: "none", viewBox: "0 0 120 34", "aria-hidden": "true" });
+  const attrs = { fill: "none", stroke: spark.stroke, "stroke-width": 2, points: spark.points };
+  if (spark.dash) attrs["stroke-dasharray"] = spark.dash;
+  svg("polyline", attrs, line);
+  return el("div", { class: "res" }, [
+    el("div", { class: "l" }, est ? [label, " ", el("span", { class: "est-tag" }, ["EST."])] : [label]),
+    el("div", { class: "v num" }, [value]),
+    el("div", { class: "s" }, [caption]),
+    line
+  ]);
+}
+
+// Last check results: compact summary card, three tiles only (mock).
+// Phrase table, organic results, and seasonality live in #check-details.
 function renderResults(message, report) {
   const slot = $("results");
   slot.replaceChildren();
-  if (!report) {
-    $("res-pill").textContent = "No check yet";
-    slot.append(el("p", { class: message && message.toLowerCase().includes("not") ? "error" : "help" }, [message || "No paid check has run."]));
-    return;
+  const real = realCheck(report);
+  let searches = "-";
+  let rivals = "-";
+  let bid = "-";
+  if (report) {
+    const volume = report.demand && report.demand.search_volume;
+    const listings = report.city_market && report.city_market.unique_listings;
+    const cpc = report.demand && report.demand.cpc;
+    if (volume && Number.isFinite(volume.value)) searches = volume.value.toLocaleString("en-US");
+    if (Number.isFinite(listings)) rivals = String(listings);
+    if (cpc && Number.isFinite(cpc.value)) bid = `$${cpc.value.toFixed(2)}`;
+    $("res-pill").textContent = real ? "Live Google data" : "Sample data";
+  } else {
+    const composite = state.location && state.proposal && state.proposal.composite;
+    const sampleSearches = composite && composite.demand && composite.demand.monthly_searches;
+    const sampleRivals = composite && composite.competition && composite.competition.competitor_count;
+    if (Number.isFinite(sampleSearches)) searches = sampleSearches.toLocaleString("en-US");
+    if (Number.isFinite(sampleRivals)) rivals = String(sampleRivals);
+    $("res-pill").textContent = "Sample data";
   }
-  const live = Boolean(report.city_market && report.city_market.live);
-  $("res-pill").textContent = live ? "Live Google data" : "Example data";
-  const volume = report.demand && report.demand.search_volume;
-  const listings = report.city_market && report.city_market.unique_listings;
-  const cpc = report.demand && report.demand.cpc;
-  const tiles = [
-    ["Monthly searches", volume && volume.value != null ? String(volume.value) : "-", live ? "Live Google data" : "Example data"],
-    ["Map pack rivals", listings == null ? "-" : String(listings), live ? "Live Google data" : "Example data"],
-    ["Top ad bid", cpc && cpc.value != null ? money(cpc.value) : "-", live ? "Live Google data" : "Example data"]
-  ];
-  tiles.forEach(([label, value, note]) => {
-    slot.append(el("div", { class: "res" }, [
-      el("div", { class: "l" }, [label]),
-      el("div", { class: "v num" }, [value]),
-      el("div", { class: "s" }, [note])
-    ]));
-  });
-  if (report.live_banner) slot.append(el("p", { class: "help" }, [report.live_banner]));
-  if (report.example_banner) slot.append(el("p", { class: "help" }, [report.example_banner]));
-  if (report.live_composite) slot.append(el("p", { class: "help" }, [`Live composite ${report.live_composite.composite_display}. Competition uses the Maps sample. Organic directory share does not change it.`]));
-  slot.append(renderPhrasePanel(report));
+  const caption = real ? "From last check." : "Sample, not live";
+  slot.append(resTile("Monthly searches", searches, caption, RES_SPARKS.searches, false));
+  slot.append(resTile("Map pack rivals", rivals, caption, RES_SPARKS.rivals, false));
+  slot.append(resTile("Top ad bid", bid, caption, RES_SPARKS.bid, true));
+  if (message) slot.append(el("p", { class: message.toLowerCase().includes("not") ? "error res-note" : "help res-note" }, [message]));
+  renderDetails(report);
+}
+
+function renderDetails(report) {
+  const section = $("check-details");
+  const slot = $("details");
+  slot.replaceChildren();
+  const has = Boolean(report && (report.demand || report.organic || report.trends));
+  section.hidden = !has;
+  if (!has) return;
+  $("details-pill").textContent = realCheck(report) ? "From last check" : "Sample data";
+  const notes = [report.live_banner, report.example_banner].filter(Boolean);
+  if (report.live_composite) notes.push(`Live composite ${report.live_composite.composite_display}. Competition uses the Maps sample. Organic directory share does not change it.`);
+  if (notes.length) slot.append(el("div", { class: "res-wide full details-notes" }, notes.map((text) => el("p", { class: "help" }, [text]))));
+  const phrases = renderPhrasePanel(report);
+  phrases.classList.add("full");
+  slot.append(phrases);
   slot.append(renderOrganicPanel(report));
   slot.append(renderSeasonality(report));
 }
@@ -529,32 +1289,48 @@ function renderOrganicPanel(report) {
   return panel;
 }
 
+const MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+// Seasonality in Check details. Prefers the measured monthly search volume
+// from the check (solid bars). Google Trends stays a text note: it is relative
+// interest, not volume. This is not the estimated-leads year chart.
 function renderSeasonality(report) {
   const trends = report.trends || {};
   const season = trends.seasonality || {};
   const geo = trends.geo || {};
-  const panel = el("section", { class: "res-wide season-card" }, [el("h3", {}, ["Seasonality"])]);
+  const monthly = report.demand && report.demand.monthly_searches;
+  const months = monthly && Array.isArray(monthly.months)
+    ? monthly.months.slice().sort((a, b) => (a.year - b.year) || (a.month - b.month))
+    : [];
+  const measured = months.filter((m) => Number.isFinite(m.value));
+  const panel = el("section", { class: "res-wide season-card" }, [
+    el("h3", {}, [measured.length ? "Search volume by month, from the check" : "Seasonality, search interest from the check"])
+  ]);
   const level = season.level ? season.level : "Missing";
   const geoLabel = geo.level ? geo.level : "unknown";
   panel.append(el("p", { class: "help" }, [
-    `Seasonality ${level}. Geo ${geoLabel}${geo.fallback_from_city ? " (broader than the city)" : ""}. ${geo.note || "Trends is relative interest, not search volume, and it does not change the demand index."}`
+    measured.length
+      ? `Measured Google Ads monthly searches for the core term. Trends seasonality ${level}, geo ${geoLabel}${geo.fallback_from_city ? " (broader than the city)" : ""}. Trends is relative interest, not search volume, and it does not change the demand index.`
+      : `Seasonality ${level}. Geo ${geoLabel}${geo.fallback_from_city ? " (broader than the city)" : ""}. ${geo.note || "Trends is relative interest, not search volume, and it does not change the demand index."}`
   ]));
   if (season.peak_months && season.peak_months.length) {
-    panel.append(el("p", {}, [`Peak months: ${season.peak_months.join(", ")}.`]));
+    panel.append(el("p", {}, [`Trends peak months: ${season.peak_months.join(", ")}.`]));
   }
-  const series = season.series || [];
+  const series = measured.length
+    ? months.map((m) => ({ label: `${MONTH_ABBR[m.month - 1]} ${String(m.year).slice(2)}`, full: `${MONTH_ABBR[m.month - 1]} ${m.year}`, value: Number.isFinite(m.value) ? m.value : null }))
+    : (season.series || []).map((m) => ({ label: m.label.slice(0, 3), full: m.label, value: Number.isInteger(m.value) ? m.value : null }));
   if (!series.length) {
-    panel.append(el("p", { class: "help" }, [trends.error && trends.error.message ? trends.error.message : "No Trends series was returned. Missing interest is not zero demand."]));
+    panel.append(el("p", { class: "help" }, [trends.error && trends.error.message ? trends.error.message : "No monthly series was returned. Missing interest is not zero demand."]));
     return panel;
   }
-  const bars = el("div", { class: "season-bars" });
-  const max = Math.max(1, ...series.map((month) => (Number.isInteger(month.value) ? month.value : 0)));
-  series.forEach((month) => {
-    const missing = !Number.isInteger(month.value);
-    const bar = el("span", { title: `${month.label}: ${missing ? "missing" : month.value}` });
-    bar.style.height = missing ? "0" : `${Math.max(4, Math.round((month.value / max) * 72))}px`;
+  const bars = el("div", { class: measured.length ? "season-bars vol" : "season-bars" });
+  const max = Math.max(1, ...series.map((m) => (m.value == null ? 0 : m.value)));
+  series.forEach((m) => {
+    const missing = m.value == null;
+    const bar = el("span", { title: `${m.full}: ${missing ? "missing" : m.value.toLocaleString("en-US")}` });
+    bar.style.height = missing ? "0" : `${Math.max(4, Math.round((m.value / max) * 72))}px`;
     if (missing) bar.className = "miss";
-    bars.append(el("i", {}, [bar, el("b", {}, [month.label.slice(0, 3)])]));
+    bars.append(el("i", {}, [bar, el("b", {}, [m.label])]));
   });
   panel.append(bars);
   return panel;
@@ -616,6 +1392,7 @@ function showStored(report) {
     ? `${state.subniche.label} in ${state.location.name}, ${state.location.state}`
     : "Saved result";
   renderResults("", report);
+  renderEstimates(state.proposal, report);
   if (report.live_composite) {
     renderGauge(
       report.live_composite,
@@ -628,8 +1405,10 @@ function showStored(report) {
 }
 
 function clearStored() {
+  const had = Boolean(state.storedReport);
   state.storedReport = null;
   state.rerunArmed = false;
+  if (had) renderResults("", null);
   markCached(false);
   paintStamp();
 }
@@ -646,12 +1425,24 @@ async function chooseSubniche(row) {
   state.nearbyCards = shortlist.nearby_cards || [];
   state.location = null;
   renderMap();
+  const mapCard = document.querySelector(".area-map");
+  if (mapCard) { mapCard.classList.remove("flash"); void mapCard.offsetWidth; mapCard.classList.add("flash"); }
+  $("live").textContent = `Step 2 map updated for ${row.label}. Sample heat only.`;
+  renderGauge(null, `${row.label}. Pick a city in Step 2.`, "");
+  renderEstimates(null);
+  renderResults("", null);
+  renderSketch(null);
+  renderQuote(null, null);
   paintStepper();
 }
 
 async function chooseLocation(card) {
   if (card.geography_type !== "city") return;
+  if (!state.subniche) return;
   state.location = card;
+  const home = regionForCity(card.id);
+  if (home) state.mapRegion = home.id;
+  $("live").textContent = `${card.name} picked. Step 2 done. Scoring with sample data.`;
   clearStored();
   renderMap();
   state.proposal = await post("/api/microsite", {
@@ -665,7 +1456,8 @@ async function chooseLocation(card) {
     `${state.proposal.subniche.label} in ${card.name}, ${card.state}`,
     state.proposal.deep_check_gate && state.proposal.deep_check_gate.demand_basis_note
   );
-  renderEstimates(state.proposal);
+  renderEstimates(state.proposal, null);
+  renderResults("", null);
   renderSketch(state.proposal);
   $("score-pill").textContent = "Sample data";
   try {
@@ -833,9 +1625,9 @@ $("pay-cancel").addEventListener("click", () => {
 fetch("/health").then((response) => response.json()).then((health) => {
   const on = Boolean(health.live_mode);
   $("server-status").classList.toggle("on", on);
-  $("server-status").querySelector("span").textContent = on ? "LIVE MODE ON" : "LIVE MODE OFF";
+  $("server-status").querySelector("span").textContent = on ? "Live mode on" : "Sample mode, live checks off";
 }).catch(() => {
-  $("server-status").querySelector("span").textContent = "LIVE MODE OFF";
+  $("server-status").querySelector("span").textContent = "Sample mode, live checks off";
 });
 
 function enlargeIcon(path) {
@@ -975,6 +1767,9 @@ function installEnlarge() {
 }
 
 installEnlarge();
+renderMap();
+renderGauge(null, "Pick a sub-niche and a city.", "");
+renderEstimates(null);
 paintStepper();
 renderQuote(null, null);
 renderSketch(null);

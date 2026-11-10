@@ -11,13 +11,12 @@
   <header class="top">
     <div class="brand"><p class="mark">Centik</p><h1 class="product">Niche Validator</h1></div>
     <div class="spacer"></div>
-    <span class="status" id="server-status"><i></i><span>LIVE MODE OFF</span></span>
+    <span class="status" id="server-status"><i></i><span>Sample mode, live checks off</span></span>
     <a class="signout" href="/logout">Sign out</a>
   </header>
   <ol class="stepper" id="stepper" aria-label="Steps"></ol>
   <div class="layout" id="grid">
-    <div class="rail">
-    <section class="card area-svc" aria-labelledby="h-svc">
+        <section class="card area-svc" aria-labelledby="h-svc">
       <div class="card-h"><span class="step">Step 1</span><h2 id="h-svc">Service</h2><span class="sp"></span><span class="sample">Sample data</span></div>
       <label class="field"><span>Service keyword</span>
         <input id="keyword" type="text" maxlength="80" autocomplete="off" placeholder="plumbing">
@@ -25,8 +24,20 @@
       <p class="help" id="lb-help">Example data only until a confirmed live check. Type a service. Ranked sub-niches use example demand.</p>
       <ol class="lb" id="lb"></ol>
     </section>
-    </div>
-    <div class="main-col">
+    <section class="card area-map" aria-labelledby="h-map">
+      <div class="card-h"><span class="step">Step 2</span><h2 id="h-map">Locations</h2><span class="sp"></span><span class="sample" id="map-pill">Sample data</span></div>
+      <div class="map-bar" id="map-bar"></div>
+      <div id="mapwrap" class="mapwrap"></div>
+      <ul class="heat-legend" aria-label="Heat scale, hottest to coldest">
+        <li><i class="h4"></i>Hottest</li>
+        <li><i class="h3"></i>Hot</li>
+        <li><i class="h2"></i>Warm</li>
+        <li><i class="h1"></i>Coldest</li>
+      </ul>
+      <p class="help map-cap" id="map-cap">Stylized heat map. Heat is sample demand, not a live street map.</p>
+      <p class="data-stamp" id="map-stamp" hidden></p>
+      <ul class="locs" id="locs"></ul>
+    </section>
     <section class="card area-gauge" aria-labelledby="h-g">
       <div class="card-h"><span class="step">Step 3</span><h2 id="h-g">Market score</h2><span class="sp"></span><span class="sample" id="score-pill">Sample data</span></div>
       <p class="help" id="score-title">Pick a sub-niche and a city.</p>
@@ -52,11 +63,11 @@
             </svg>
           </div>
           <ul class="zone-legend" id="zone-legend">
-            <li data-zone="No"><i style="background:#f87171"></i>No</li>
-            <li data-zone="Low"><i style="background:#fb923c"></i>Low</li>
-            <li data-zone="Medium"><i style="background:#fbbf24"></i>Medium</li>
-            <li data-zone="High"><i style="background:#a3e635"></i>High</li>
-            <li data-zone="Max"><i style="background:#34d399"></i>Max</li>
+            <li data-zone="No"><i class="z-no"></i>No</li>
+            <li data-zone="Low"><i class="z-low"></i>Low</li>
+            <li data-zone="Medium"><i class="z-med"></i>Medium</li>
+            <li data-zone="High"><i class="z-high"></i>High</li>
+            <li data-zone="Max"><i class="z-max"></i>Max</li>
           </ul>
           <p class="score-block"><span class="score num"><span id="num">-</span><small>/ 100</small></span><span id="chipwrap"></span></p>
           <p class="verdict" id="verdict">The score appears after you pick a city.</p>
@@ -67,23 +78,19 @@
         </div>
       </div>
     </section>
-    <section class="card area-map" aria-labelledby="h-map">
-      <div class="card-h"><span class="step">Step 2</span><h2 id="h-map">Locations</h2><span class="sp"></span><span class="sample" id="map-pill">Sample data</span></div>
-      <div id="mapwrap"></div>
-      <p class="help">Stylized, not a real map. Glow shows sample demand.</p>
-      <p class="data-stamp" id="map-stamp" hidden></p>
-      <ul class="locs" id="locs"></ul>
-    </section>
-    <section class="card area-est" id="est-card" hidden aria-labelledby="h-est">
+    <section class="card area-est" id="est-card" aria-labelledby="h-est">
       <div class="card-h"><h2 id="h-est">Estimates</h2><span class="est-tag">EST.</span><span class="sp"></span><span class="sample" id="est-pill">Sample data</span></div>
       <div class="kpis" id="kpis"></div>
+      <p class="help est-rate-note" id="est-rate-note" hidden></p>
+      <div id="chartwrap" class="chartwrap"></div>
+      <div class="legend" id="est-legend" hidden><span><i></i>Estimated leads, middle</span><span><i class="band"></i>Likely range</span></div>
     </section>
     <section class="card area-paid" aria-labelledby="h-paid">
       <div class="card-h"><span class="step">Step 4</span><h2 id="h-paid">Confirm paid check</h2><span class="sp"></span><span class="sample" id="paid-pill">Sample data</span></div>
       <div class="warn" id="paid-warn" role="note" hidden><span aria-hidden="true">!</span><span id="paid-warn-text">This check costs money. Nothing runs until you press Okay.</span></div>
       <dl class="kv" id="paid-kv"></dl>
       <ul class="call-list" id="paid-calls"></ul>
-      <div class="budget"><div class="row"><span>Spend to date</span><b class="num" id="spent-label">$0.00</b></div><div class="track"><span id="budget-bar" style="width:0"></span></div></div>
+      <div class="budget"><div class="row"><span>Spend to date</span><b class="num" id="spent-label">$0.00</b></div><div class="track"><span id="budget-bar"></span></div></div>
       <p class="data-stamp" id="paid-stamp" hidden></p>
       <div class="actions">
         <button class="btn pri" type="button" id="pay-go" disabled>Okay, run paid check</button>
@@ -99,12 +106,17 @@
       <div class="card-h"><h2 id="h-res">Last check results</h2><span class="sp"></span><span class="sample" id="res-pill">Sample data</span></div>
       <div class="res-grid" id="results"></div>
     </section>
-    </div>
   </div>
+  <section class="card check-details" id="check-details" aria-labelledby="h-details" hidden>
+    <div class="card-h"><h2 id="h-details">Check details</h2><span class="sp"></span><span class="sample" id="details-pill">From last check</span></div>
+    <p class="help">Full output of the last paid check. The summary tiles above come from this.</p>
+    <div class="details-grid" id="details"></div>
+  </section>
   <p class="foot">Fixture numbers keep a Sample data pill. A paid check runs only after Okay.</p>
   <p class="sr" aria-live="polite" id="live"></p>
 </div>
 <div class="card-scrim" id="card-scrim" hidden></div>
+<script src="/us-heat-map.js"></script>
 <script src="/dashboard.js"></script>
 </body>
 </html>

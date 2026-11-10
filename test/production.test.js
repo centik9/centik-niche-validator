@@ -104,6 +104,31 @@ test("login is required, rate limited, and does not put secrets in the client", 
   assert.equal(bundle.includes(TEST_CODE), false);
 });
 
+test("a signed-in session can load the heat map and cannot load a preview seed", async () => {
+  const app = createApp({ env: { ...TEST_AUTH }, now: () => NOW });
+  await withServer(app, async (port) => {
+    const locked = await fetch(`http://127.0.0.1:${port}/us-heat-map.js`, { redirect: "manual" });
+    assert.equal(locked.status, 302);
+    assert.equal(locked.headers.get("location"), "/login");
+    const cookie = await sessionCookie(port);
+    const map = await fetch(`http://127.0.0.1:${port}/us-heat-map.js`, { headers: { cookie } });
+    assert.equal(map.status, 200);
+    assert.match(map.headers.get("content-type") || "", /javascript/);
+    const body = await map.text();
+    assert.match(body, /window\.US_HEAT_MAP/);
+    assert.equal(body.includes("preview-seed"), false);
+    const seed = await fetch(`http://127.0.0.1:${port}/preview-seed.json`, { headers: { cookie } });
+    assert.equal(seed.status, 404);
+    const dashboard = await fetch(`http://127.0.0.1:${port}/dashboard.js`);
+    assert.equal(dashboard.status, 200);
+    const script = await dashboard.text();
+    assert.equal(script.includes("preview-seed"), false);
+    assert.equal(script.includes("est-rate-note"), true);
+    assert.equal(script.includes("\u2014"), false);
+    assert.equal(script.includes("\u2013"), false);
+  });
+});
+
 test("a live check uses Maps depth 100 and does not derive competition from demand", async () => {
   const example = createExampleTransport();
   const calls = [];

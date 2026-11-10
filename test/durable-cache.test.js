@@ -281,13 +281,17 @@ test("dashboard copy keeps the rerun label, stamp, and enlarge control", async (
   assert.match(html, /Nothing runs until you press Okay\./);
   assert.match(dashboard, /Nothing runs until you press Rerun paid check\./);
   assert.match(dashboard, /Saved check/);
-  assert.match(dashboard, /No sketch yet/);
+  assert.match(dashboard, /The sketch appears after you keep a city\./);
   assert.match(dashboard, /pill\.textContent = "Confirm"/);
   assert.match(dashboard, /enlarge-holder/);
+  assert.match(html, /id="est-rate-note"/);
+  assert.match(html, /src="\/us-heat-map\.js"/);
+  assert.equal(dashboard.includes("preview-seed"), false);
   assert.match(css, /background:\s*#000/);
   assert.match(css, /\.card-scrim\.open \{ opacity: \.8/);
   assert.match(css, /body\.card-focus \.shell \{ filter: blur\(12px\)/);
-  assert.match(css, /max-height: min\(380px, 40vh\)/);
+  assert.match(css, /max-height: 90vh/);
+  assert.match(css, /max-height: min\(600px, 62vh\)/);
   assert.match(css, /min\(1200px, 92vw\)/);
   assert.match(css, /flex-wrap:\s*nowrap/);
   assert.match(css, /\.enlarge\[hidden\], \.enlarge-close\[hidden\], \.warn\[hidden\], \.card-scrim\[hidden\]/);
@@ -295,11 +299,13 @@ test("dashboard copy keeps the rerun label, stamp, and enlarge control", async (
   assert.match(css, /z-index:\s*1001/);
   assert.match(css, /#fbbf24/);
   assert.match(css, /#1c1404/);
-  assert.equal(dashboard.includes("\u2014"), false);
-  assert.equal(dashboard.includes("\u2013"), false);
-  assert.equal(html.includes("\u2014"), false);
-  assert.equal(html.includes("\u2013"), false);
+  const heatMap = await fs.readFile(new URL("../public/us-heat-map.js", import.meta.url), "utf8");
+  for (const text of [dashboard, html, css, heatMap]) {
+    assert.equal(text.includes("\u2014"), false);
+    assert.equal(text.includes("\u2013"), false);
+  }
   assert.equal(html.includes("Mesa"), false);
   assert.equal(dashboard.includes("Las Vegas"), false);
   assert.equal(html.includes("Las Vegas"), false);
+  assert.equal(heatMap.includes("preview-seed"), false);
 });
