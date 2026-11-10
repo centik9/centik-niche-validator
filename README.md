@@ -35,6 +35,28 @@ Ideas that name a different trade (plumbing on a welding search, electrician or 
 
 A confirmed lookup is cached by normalized keyword and location code (`welding|2840|keyword-ideas-v1`). The same keyword, including different capitalization, is served from that cache at `$0` and does not call DataForSEO. The cache file defaults to `./data/subniche-cache.json`. A different keyword is a new confirmation. Nothing is sent without the one-time spend token, and a token from the city check cannot be reused here.
 
+## Run history
+
+Every completed check for the signed-in user is appended to a JSON file, the same kind of store as the result cache. The default path is `run-history.json` beside `RESULT_STORE_PATH`. Render's free disk does not survive sleep, so point `RUN_HISTORY_PATH` and `RESULT_STORE_PATH` at storage that does. A row stores the date, service, city, state, volume, map sample, competition, market score, and the zone chip (No, Low, Medium, High, or Max). That zone chip is the grade. There is no letter grade. The active lens is stored too. Credentials and spend tokens are not.
+
+Runs group by service, city, state, map depth, and check version. A shallower map depth stays in its own group. It is not reused for a depth 100 check and it is not compared with one. History is a top-bar button and opens in the same enlarge overlay. A repeat of the same group can open a side-by-side compare. A moved number reads `up 6` or `down 6`. A range stays a range. If the lenses differ, the kinds of number differ, or a field is missing, the change reads `Not comparable`.
+
+## Two lenses
+
+Classroom floor and Jesse's four-yes test use the same inputs and return two verdicts. They are not averaged and they are not one badge. The sample water heater repair row can pass Classroom floor and fail the four-yes test on the same sample ticket. That tension stays visible.
+
+Classroom floor follows the Microsite Empire notes: urgent one-off work people phone about, and a job value of at least $500. The $1,000 to $2,000 line is guidance, not a second hard fail. The lens fails only when a published job total is under $500. Non-urgent work is Caution. Emergency locksmith is the course example of the floor and a flagged niche, so both lenses show Hard stop and never Pass.
+
+Jesse's four-yes test, in order: a ticket of $5,000 or more, about 1,500 operators in the state, a weak page one for "best [service] in [location]", and sponsored ads. The operator row is the directory test. It is shown and it does not by itself fail a microsite. Missing data is Not enough evidence, not a no. The market-score dial stays a separate Demand, Competition, and Margin score.
+
+The lens verdict has to be on screen before Step 4 can be armed. Hard stop keeps Step 4 locked. You can still type a service and skip the shortlist.
+
+## Discovery shortlist
+
+`Generate shortlist` sits above the grid, labeled Before Step 1. It is free and it does not call DataForSEO. It ranks city and service pairs from the Nov 6 and Nov 10 research notes and, in free mode, from the bundled Census extract: owner-occupancy, population when a note has it, a population-edge label, a price-guide ticket, and Places or contractor-page checks. Housing age stays Not fetched. It is not in that method and it is not used to rank. There is no fit score. An unmeasured field says Not on file or Not fetched. The tool does not invent search volume, CPC, review counts, or ranks.
+
+The worked example puts Bella Vista retaining walls first and keeps Lancaster septic visible as the fallback if that map pack is dense, then Grass Valley, Battle Ground, and Leland. Other pairs are ranked with the same rules when a measurement is on file. `Use this pair` fills the service and the city field only. The heat map stays the Austin and Cedar Park sample. The city field accepts any US city name. Paid DataForSEO stays behind the spend confirmation and the $10 cap.
+
 ## Free pre-screen
 
 `POST /api/screen` ranks a short list of 1 to 20 US cities, counties, and metros before any DataForSEO call. The screen model is `centik-free-screen-v1`. It is not the paid heuristic index, not a probability, and not a revenue prediction.
@@ -156,6 +178,7 @@ Copy the names from `.env.example`. Put real values in the host environment, not
 | `SPEND_LEDGER_PATH` | JSON ledger of paid calls. Default `./data/spend-ledger.json`. Each row stores the timestamp, user, niche, market, calls, and the cost DataForSEO returned. |
 | `RESULT_STORE_PATH` | JSON file of scored map and search results. The server defaults to `./data/result-cache.json` when this is unset. A hit for the same niche, city, check version, and a map depth at least as deep as the current check is quoted at $0 and does not call DataForSEO. A shallower or older check version is not reused. Results stay until someone uses Rerun paid check. |
 | `SUBNICHE_CACHE_PATH` | JSON file of Step 1 specialty lookups. Default `./data/subniche-cache.json`. A hit for the same normalized keyword and United States location is served at $0. |
+| `RUN_HISTORY_PATH` | JSON file of completed checks for signed-in users. Default is `run-history.json` beside `RESULT_STORE_PATH`. Same disk caveat. |
 | `SPEND_TOKEN_SECRET` | HMAC key for the one-time spend token. There is no default. |
 | `ALLOWED_EMAILS` | Comma-separated emails that may sign in. Default `team@centik.ai`. |
 | `TEAM_ACCESS_CODE_HASH` | scrypt hash of the access code. Generate it with `node scripts/hash-access-code.mjs`. The plain code is not stored. |
@@ -280,7 +303,7 @@ Example location coverage is a small gazetteer: several Springfields, both Portl
 - Health check: `GET /health`
 - Bind is `0.0.0.0:$PORT`. Render sets `PORT`.
 - These keys are `sync: false` and have no value in the file: `DATAFORSEO_LIVE`, `DATAFORSEO_LOGIN`, `DATAFORSEO_PASSWORD`, `SPEND_CAP_USD`, `SPEND_TOKEN_SECRET`, `SESSION_SECRET`, `TEAM_ACCESS_CODE_HASH`, `ALLOWED_EMAILS`. Set them in the Dashboard. Do not commit them.
-- The free plan's disk is ephemeral, so `./data/spend-ledger.json`, `./data/result-cache.json`, and `./data/subniche-cache.json` reset when the service sleeps, restarts, or redeploys. The cap still applies for the life of that instance. This repo does not add a Render Postgres or Key Value instance. The result store is the `load` / `find` / `save` interface in `src/result-store.js`. The file store is what tests and a local preview use. For a production host that already has storage surviving restart, set `RESULT_STORE_PATH` and `SUBNICHE_CACHE_PATH` to paths that survive restart, or pass a `resultStore` into `createSpendGate`. Do not buy a new database for this cache.
+- The free plan's disk is ephemeral, so `./data/spend-ledger.json`, `./data/result-cache.json`, `./data/run-history.json`, and `./data/subniche-cache.json` reset when the service sleeps, restarts, or redeploys. The cap still applies for the life of that instance. This repo does not add a Render Postgres or Key Value instance. The result store is the `load` / `find` / `save` interface in `src/result-store.js`. Run history uses the same kind of file store, in the same directory by default. The file store is what tests and a local preview use. For a production host that already has storage surviving restart, set `RESULT_STORE_PATH`, `RUN_HISTORY_PATH`, and `SUBNICHE_CACHE_PATH` to paths that survive restart, or pass a `resultStore` into `createSpendGate`. Do not buy a new database for this cache.
 
 ## One cheap live check
 

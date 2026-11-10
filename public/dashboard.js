@@ -92,7 +92,10 @@ const state = {
   rerunArmed: false,
   busy: false,
   mapRegion: null,
-  specialtyQuote: null
+  specialtyQuote: null,
+  lens: "classroom",
+  lensReport: null,
+  runs: []
 };
 
 let suggestTimer = 0;
@@ -198,13 +201,8 @@ function paintStepper() {
   const steps = [
     ["1. Service", state.subniche ? state.subniche.label : "Keyword"],
     ["2. Locations", state.location ? `${state.location.name}, ${state.location.state}` : "Pick a city"],
-    ["3. Market score", (() => {
-      const composite = state.location && state.proposal && state.proposal.composite;
-      const score = composite && composite.status === "calculated" ? composite.composite_display : null;
-      if (score != null && score !== "") return String(score);
-      return state.location ? "No score yet" : "After a city";
-    })()],
-    ["4. Check", state.rerunArmed ? "Confirm the charge" : state.storedReport ? "Saved result" : state.quote ? "Waiting for your okay" : "Not quoted"]
+    ["3. Microsite", state.proposal ? "Sketch ready" : "After a city"],
+    ["4. Check", state.lensReport && state.lensReport.hard_stop ? "Hard stop" : state.rerunArmed ? "Confirm the charge" : state.storedReport ? "Saved result" : state.quote ? "Waiting for your okay" : "Needs a lens"]
   ];
   const current = state.quote || state.storedReport ? 3 : state.proposal ? 2 : state.cards.length ? 1 : 0;
   $("stepper").replaceChildren(...steps.map(([label, detail], index) => el("li", {
@@ -1217,7 +1215,8 @@ function renderQuote(quote, proposal) {
   go.textContent = stored ? "Rerun paid check" : "Okay, run paid check";
   go.classList.toggle("money", stored);
   go.classList.toggle("pri", !stored);
-  const ready = stored ? (!state.busy && (state.rerunArmed ? Boolean(quote) : Boolean(state.storedReport))) : Boolean(quote) && !state.busy;
+  const locked = Boolean(state.lensReport && state.lensReport.hard_stop);
+  const ready = stored ? (!state.busy && (state.rerunArmed ? Boolean(quote) : Boolean(state.storedReport))) : Boolean(quote) && !state.busy && !locked && Boolean(state.lensReport);
   go.disabled = !ready;
   const showCancel = stored ? state.rerunArmed : Boolean(quote);
   $("pay-cancel").hidden = !showCancel;
@@ -1535,6 +1534,7 @@ async function chooseSubniche(row) {
   renderSketch(null);
   renderQuote(null, null);
   paintStepper();
+  loadRules(row.label);
 }
 
 async function chooseLocation(card) {
@@ -1562,6 +1562,14 @@ async function chooseLocation(card) {
   renderResults("", null);
   renderSketch(state.proposal);
   $("score-pill").textContent = "Sample data";
+  if (!state.lensReport && state.subniche) await loadRules(state.subniche.label, card.name, card.state);
+  if (state.lensReport && state.lensReport.hard_stop) {
+    state.quote = null;
+    renderQuote(null, state.proposal);
+    $("paid-note").textContent = "Hard stop. Step 4 stays locked.";
+    paintStepper();
+    return;
+  }
   try {
     const resolved = await post("/api/resolve", { mode: "example", city: card.name, state: card.state, country: "United States" });
     const side = (match) => match ? { location_code: match.location_code, location_name: match.location_name, location_type: match.location_type } : null;
@@ -1636,7 +1644,8 @@ async function runPaid() {
       state: state.location.state,
       country: "United States",
       geography_type: "city",
-      confirmed: state.confirmed
+      confirmed: state.confirmed,
+      lens: state.lens
     });
     showStored(report);
     state.quote = await post("/api/quote", quoteBody(false));
@@ -1814,6 +1823,10 @@ function closeEnlarged() {
   const scrim = $("card-scrim");
   scrim.classList.remove("open");
   document.body.classList.remove("card-focus");
+  const orb = document.getElementById("centik-orb");
+  const orbLabel = document.getElementById("centik-orb-lbl");
+  if (orb && !$("history").classList.contains("open")) orb.inert = false;
+  if (orbLabel && !$("history").classList.contains("open")) orbLabel.inert = false;
   enlargedCard = null;
   window.clearTimeout(enlargeTimer);
   enlargeTimer = window.setTimeout(() => {
@@ -1837,6 +1850,10 @@ function openEnlarged(card) {
   if (scrim.parentNode !== document.body) document.body.append(scrim);
   scrim.hidden = false;
   document.body.classList.add("card-focus");
+  const orb = document.getElementById("centik-orb");
+  const orbLabel = document.getElementById("centik-orb-lbl");
+  if (orb) orb.inert = true;
+  if (orbLabel) orbLabel.inert = true;
   if (!enlargeHome) {
     enlargeHome = document.createElement("div");
     enlargeHome.className = "enlarge-holder";
@@ -1914,3 +1931,393 @@ paintStepper();
 renderQuote(null, null);
 renderSketch(null);
 renderResults("");
+
+function verdictWord(verdict) {
+  if (verdict === "pass") return "Pass";
+  if (verdict === "fail") return "Fail";
+  if (verdict === "caution") return "Caution";
+  if (verdict === "hard_stop") return "Hard stop";
+  return "Not enough evidence";
+}
+
+function markGlyph(mark) {
+  if (mark === "yes") return { cls: "yes", glyph: "\u2713", word: "Yes" };
+  if (mark === "no") return { cls: "no", glyph: "\u2715", word: "No" };
+  return { cls: "unk", glyph: "?", word: "Not enough evidence" };
+}
+
+function moneyRange(price) {
+  if (!price || !Number.isInteger(price.low_dollars) || !Number.isInteger(price.high_dollars)) return "Not on file";
+  const fmt = (amount) => `$${amount.toLocaleString("en-US")}`;
+  return `${fmt(price.low_dollars)} to ${fmt(price.high_dollars)}${price.open_high ? "+" : ""}`;
+}
+
+function setLens(lens) {
+  state.lens = lens === "four_yes" ? "four_yes" : "classroom";
+  for (const button of document.querySelectorAll(".seg button")) {
+    const on = button.dataset.lens === state.lens;
+    button.setAttribute("aria-checked", on ? "true" : "false");
+    button.tabIndex = on ? 0 : -1;
+  }
+  renderRules();
+  renderShortlist();
+  $("live").textContent = `${state.lens === "four_yes" ? "Jesse's four-yes test" : "Classroom floor"} lens. Numbers unchanged.`;
+}
+
+async function loadRules(service, city, stateName) {
+  if (!service) return;
+  try {
+    state.lensReport = await post("/api/lenses", { service, city: city || "", state: stateName || "" });
+  } catch (error) {
+    state.lensReport = null;
+    $("lens-help").textContent = error.message || "The rules could not be loaded.";
+  }
+  renderRules();
+  if (state.lensReport && state.lensReport.hard_stop) {
+    state.quote = null;
+    renderQuote(state.quote, state.proposal);
+    $("paid-note").textContent = "Hard stop. Step 4 stays locked.";
+  }
+  paintStepper();
+}
+
+function renderRules() {
+  const report = state.lensReport;
+  const help = $("lens-help");
+  const raw = $("rules-raw");
+  const out = $("rules-out");
+  if (!raw || !out) return;
+  raw.replaceChildren();
+  out.replaceChildren();
+  if (!report) {
+    if (help) help.textContent = "Pick a service to see this test. This test is separate from the market score.";
+    return;
+  }
+  const active = state.lens === "four_yes" ? report.four_yes : report.classroom;
+  const other = state.lens === "four_yes" ? report.classroom : report.four_yes;
+  if (help) {
+    help.textContent = state.lens === "four_yes"
+      ? "Jesse's four-yes test. Ticket $5,000 or more, about 1,500 operators in the state, a weak page one for best X in Y, and sponsored ads. Row 2 is a directory test."
+      : "Classroom floor. Urgent, one-off jobs people phone about. Job value $500 or more, ideally $1,000 to $2,000. The course uses emergency locksmith as its example.";
+  }
+  const rows = report.raw ? [
+    ["Job ticket", report.raw.job_ticket],
+    ["Kind of job", report.raw.kind_of_job],
+    ["Operators in the state", report.raw.operators],
+    ["Best query page one", report.raw.best_query],
+    ["Sponsored ads on that search", report.raw.ads],
+    ["Rank Expand flagged niche", report.raw.flagged]
+  ] : [
+    ["Job ticket", moneyRange(report.price)],
+    ["Kind of job", report.service || ""],
+    ["Operators in the state", "Not on file"],
+    ["Best query page one", "Not checked"],
+    ["Sponsored ads on that search", "Not checked"],
+    ["Rank Expand flagged niche", report.hard_stop ? "Yes" : "No"]
+  ];
+  rows.forEach(([name, value]) => raw.append(el("dt", {}, [name]), el("dd", {}, [value])));
+  const verdict = el("p", {}, [
+    el("span", { class: `verdict-chip v-${active.verdict === "pass" ? "pass" : active.verdict === "fail" || active.verdict === "hard_stop" ? "fail" : "unk"}` }, [verdictWord(active.verdict)]),
+    " ",
+    active.verdict === "pass" ? "Meets this test." : active.verdict === "caution" ? "Job value can clear $500. This is not urgent one-off work." : active.verdict === "hard_stop" ? "Hard stop. Step 4 stays locked." : active.verdict === "fail" ? "This test does not pass." : "Not enough evidence."
+  ]);
+  if (other && other.verdict !== active.verdict) {
+    verdict.append(el("span", { class: "help" }, [` ${other.label}: ${verdictWord(other.verdict)}. These are two different tests.`]));
+  }
+  const list = el("ol", { class: "crit" });
+  (active.rows || []).forEach((row) => {
+    const mark = markGlyph(row.mark);
+    list.append(el("li", {}, [
+      el("span", { class: `mark ${mark.cls}`, "aria-hidden": "true" }, [mark.glyph]),
+      el("span", {}, [el("b", {}, [row.label]), el("small", { class: "help" }, [row.note || row.evidence || ""])]),
+      el("span", {}, [mark.word])
+    ]));
+  });
+  const standing = el("p", { class: "help" }, [
+    report.hard_stop
+      ? "Standing rule, both lenses: Hard stop. A flagged niche keeps Step 4 locked."
+      : "Standing rule, both lenses: not a Rank Expand flagged niche."
+  ]);
+  out.append(verdict, list, standing);
+}
+
+async function generateShortlist() {
+  const ideas = ($("disc-ideas") && $("disc-ideas").value.trim()) || state.keyword;
+  if (!ideas || ideas.length < 2) {
+    $("shortlist-note").textContent = "Enter a service idea first. No rows were invented.";
+    return;
+  }
+  const progress = $("shortlist-progress");
+  progress.hidden = false;
+  progress.value = 0;
+  try {
+    const report = await post("/api/discover", { service: ideas, lens: state.lens, mode: "example" });
+    progress.value = 1;
+    state.discovery = report;
+    renderShortlist();
+    $("live").textContent = report.rows && report.rows.length
+      ? "Shortlist ready. This is free. It does not run a paid check."
+      : (report.message || "No shortlist. Nothing was invented.");
+  } catch (error) {
+    state.discovery = { rows: [], message: error.message || "The shortlist failed. No rows were invented." };
+    renderShortlist();
+    $("shortlist-note").textContent = state.discovery.message;
+  } finally {
+    progress.hidden = true;
+  }
+}
+
+function renderShortlist() {
+  const list = $("shortlist");
+  if (!list) return;
+  const rows = (state.discovery && state.discovery.rows) || [];
+  list.replaceChildren();
+  if (!rows.length) {
+    const message = state.discovery && state.discovery.message;
+    if (message) list.append(el("li", { class: "help" }, [message]));
+    return;
+  }
+  rows.forEach((row) => {
+    const chip = row.lens_chip || {};
+    const owner = row.census && row.census.owner_occupancy_rate;
+    const ownerText = owner && owner.status === "measured" ? `${Math.round(owner.value * 1000) / 10}%` : "Not on file";
+    const population = row.census && row.census.population;
+    const popText = population && population.status === "measured" ? population.value.toLocaleString("en-US") : "Not on file";
+    const home = row.census && row.census.median_home_value;
+    const homeText = home && home.status === "measured" ? `$${home.value.toLocaleString("en-US")}` : "Not on file";
+    const ratings = row.competition && Number.isInteger(row.competition.strongest_in_town_ratings)
+      ? `${row.competition.strongest_in_town_ratings} ratings`
+      : "Not on file";
+    const item = el("li", { class: `sl-row${row.status_tag === "Fallback for #1" || row.surfaced_as === "fallback" ? " fallback" : ""}` }, [
+      el("div", { class: "sl-rk num" }, [String(row.position)]),
+      el("div", {}, [
+        el("h3", {}, [`${row.service} · ${row.city}, ${row.state}`]),
+        el("p", {}, [el("span", { class: "tag" }, [row.status_tag || "Ranked"])]),
+        el("div", { class: "sigs" }, [
+          el("div", { class: "sig" }, [el("span", { class: "l" }, ["Owner-occupied"]), el("span", { class: "v num" }, [ownerText])]),
+          el("div", { class: "sig" }, [el("span", { class: "l" }, ["Population"]), el("span", { class: "v num" }, [popText])]),
+          el("div", { class: "sig" }, [el("span", { class: "l" }, ["Median home value"]), el("span", { class: "v num" }, [homeText])]),
+          el("div", { class: row.price && row.price.status === "published" ? "sig" : "sig miss" }, [
+            el("span", { class: "l" }, ["Job ticket ", el("span", { class: "est-tag" }, ["EST."])]),
+            el("span", { class: "v num est-val" }, [row.price && row.price.status === "published" ? moneyRange(row.price) : "Not on file"])
+          ]),
+          el("div", { class: "sig" }, [el("span", { class: "l" }, ["Top Maps incumbent seen"]), el("span", { class: "v num" }, [ratings])]),
+          el("div", { class: "sig" }, [el("span", { class: "l" }, ["Named operators"]), el("span", { class: "v num" }, [row.named_label || "Not on file"])]),
+          el("div", { class: "sig miss" }, [el("span", { class: "l" }, ["Housing age"]), el("span", { class: "v num" }, ["Not fetched"]), el("span", { class: "s" }, ["Not in source method"])])
+        ]),
+        el("p", { class: "why" }, [row.why ? `Why here: ${row.why}` : ""]),
+        row.fallback_reason ? el("p", { class: "fb-note" }, [el("span", { class: "fb-k" }, ["Fallback reason: pack density "]), row.fallback_reason]) : ""
+      ]),
+      el("div", { class: "sl-side" }, [
+        el("span", { class: "verdict-chip v-unk" }, [verdictWord(chip.verdict)]),
+        chip.disagree ? el("small", { class: "help" }, [`${chip.other_label}: ${verdictWord(chip.other_verdict)}`]) : "",
+        el("button", { class: "btn ghost cy sm", type: "button" }, ["Use this pair"]),
+        el("small", { class: "help" }, ["Fills Service and City. Runs nothing."])
+      ])
+    ]);
+    item.querySelector("button").addEventListener("click", () => usePair(row));
+    list.append(item);
+  });
+}
+
+function usePair(row) {
+  $("keyword").value = row.service;
+  state.keyword = row.service;
+  const city = $("city-any");
+  if (city) city.value = `${row.city}, ${row.state}`;
+  const picked = $("picked-line");
+  if (picked) {
+    picked.hidden = false;
+    picked.textContent = `Service: ${row.service}. City: ${row.city}, ${row.state}. Step 4 still needs Okay before any paid check.`;
+  }
+  $("live").textContent = `Filled ${row.service} in ${row.city}, ${row.state}. Fills Service and City. Runs nothing.`;
+  loadRules(row.service, row.city, row.state);
+}
+
+function groupRuns(runs) {
+  const groups = new Map();
+  for (const run of runs) {
+    const depth = Number.isInteger(run.maps_depth) ? run.maps_depth : "none";
+    const version = run.check_version || "preview";
+    const key = `${run.niche}|${run.city}|${run.state}|${depth}|${version}`;
+    const list = groups.get(key) || [];
+    list.push(run);
+    groups.set(key, list);
+  }
+  return [...groups.values()];
+}
+
+function renderHistory(runs) {
+  const slot = $("history-list");
+  slot.hidden = false;
+  $("diff").hidden = true;
+  $("history-back").hidden = true;
+  $("h-history").textContent = "History";
+  slot.replaceChildren();
+  if (!runs.length) {
+    slot.append(el("p", { class: "help" }, ["No saved checks yet."]));
+    return;
+  }
+  groupRuns(runs).forEach((group) => {
+    const sample = group[0];
+    const shallow = Number.isInteger(sample.maps_depth) && sample.maps_depth < 100;
+    const head = el("div", { class: "hgroup" }, [
+      el("h3", {}, [`${sample.niche} · ${sample.city}, ${sample.state}`]),
+      el("p", { class: "help" }, [shallow
+        ? "Shallower check. It is not reused for a depth 100 check and is not compared with one."
+        : `Maps depth ${sample.maps_depth == null ? "not stored" : sample.maps_depth} · ${sample.check_version || "preview"}`])
+    ]);
+    const table = el("table", { class: "run-table" });
+    table.append(el("tr", {}, ["Date", "Score", "Searches", "Map pack", "Grade", "Lens used"].map((label) => el("th", {}, [label]))));
+    group.forEach((run) => {
+      const zone = run.zone && run.zone.value ? run.zone.value : "Unavailable";
+      const score = run.market_score && run.market_score.value != null ? String(run.market_score.value) : "Unavailable";
+      const volume = run.volume && run.volume.value != null ? String(run.volume.value) : "Unavailable";
+      const pack = run.map_pack ? (run.map_pack.value != null ? String(run.map_pack.value) : "Unavailable") : "Unavailable";
+      table.append(el("tr", {}, [
+        el("td", {}, [run.checked_at ? run.checked_at.replace("T", " ").slice(0, 16) : ""]),
+        el("td", { class: "num" }, [score]),
+        el("td", { class: "num" }, [volume]),
+        el("td", {}, [pack]),
+        el("td", {}, [el("span", { class: "zone-chip" }, [zone])]),
+        el("td", {}, [run.lens_label || "Not stored"])
+      ]));
+    });
+    head.append(table);
+    if (group.length >= 2 && !shallow) {
+      const button = el("button", { class: "btn ghost sm", type: "button" }, ["Compare runs"]);
+      button.addEventListener("click", () => openCompare(group[0], group[1]));
+      head.append(button);
+    } else if (!shallow) {
+      head.append(el("p", { class: "help" }, ["Needs a second run"]));
+    }
+    slot.append(head);
+  });
+  slot.append(el("p", { class: "help" }, ["Open loads the saved check for $0. Nothing calls DataForSEO."]));
+}
+
+async function openCompare(newer, older) {
+  if (newer.maps_depth !== older.maps_depth || newer.lens !== older.lens && false) return;
+  const response = await fetch(`/api/runs/diff?id=${encodeURIComponent(newer.id)}&prior=${encodeURIComponent(older.id)}`);
+  const payload = await response.json();
+  if (!payload.diff) return;
+  renderDiff(payload.diff);
+}
+
+function renderDiff(diff) {
+  $("history-list").hidden = true;
+  $("history-back").hidden = false;
+  $("h-history").textContent = "Compare runs";
+  const slot = $("diff");
+  slot.hidden = false;
+  slot.replaceChildren();
+  if (diff.lens_note) slot.append(el("p", {}, [diff.lens_note]));
+  const summary = diff.changes && diff.changes.length ? diff.changes.join(" ") : "No numeric change.";
+  slot.append(el("p", {}, [`What changed: ${summary}`]));
+  slot.append(el("p", { class: "help" }, ["Newer minus older"]));
+  const table = el("div", { class: "diff-table" });
+  table.append(el("div", { class: "diff-row" }, [
+    el("span", {}, ["Field"]),
+    el("span", {}, ["Earlier"]),
+    el("span", {}, ["This run"]),
+    el("span", {}, ["Change"])
+  ]));
+  const stack = el("div", { class: "diff-stack" });
+  (diff.rows || []).forEach((row) => {
+    if (row.id === "grade") return;
+    table.append(el("div", { class: "diff-row" }, [
+      el("span", {}, [row.label]),
+      el("span", {}, [row.older_display]),
+      el("span", {}, [row.newer_display]),
+      el("span", { class: "diff-delta" }, [row.delta_text === "not comparable" ? "Not comparable" : row.delta_text === "unchanged" ? "no change" : row.delta_text])
+    ]));
+    stack.append(el("div", { class: "sig" }, [
+      el("span", { class: "l" }, [row.label]),
+      el("span", {}, [`${row.older_display} | ${row.newer_display}`]),
+      el("span", { class: "help" }, [row.delta_text === "not comparable" ? "Not comparable" : row.delta_text])
+    ]));
+  });
+  slot.append(table, stack);
+  $("live").textContent = `What changed: ${summary}`;
+}
+
+function openHistory() {
+  fetch("/api/runs").then((response) => response.json()).then((payload) => {
+    state.runs = payload.runs || [];
+    const count = state.runs.length;
+    const label = $("history-count");
+    if (label) label.textContent = `${count} ${count === 1 ? "run" : "runs"}`;
+    renderHistory(state.runs);
+    const dialog = $("history");
+    dialog.hidden = false;
+    dialog.classList.add("open");
+    document.body.classList.add("card-focus");
+    $("card-scrim").hidden = false;
+    requestAnimationFrame(() => $("card-scrim").classList.add("open"));
+    $("open-history").setAttribute("aria-expanded", "true");
+    const orb = $("centik-orb");
+    const orbLabel = $("centik-orb-lbl");
+    if (orb) orb.inert = true;
+    if (orbLabel) orbLabel.inert = true;
+    $("close-history").focus();
+  }).catch(() => {
+    $("live").textContent = "Run history could not be loaded.";
+  });
+}
+
+function closeHistory() {
+  const dialog = $("history");
+  dialog.classList.remove("open");
+  dialog.hidden = true;
+  $("open-history").setAttribute("aria-expanded", "false");
+  if (!document.querySelector(".card.is-enlarged")) {
+    document.body.classList.remove("card-focus");
+    $("card-scrim").classList.remove("open");
+    $("card-scrim").hidden = true;
+    const orb = $("centik-orb");
+    const orbLabel = $("centik-orb-lbl");
+    if (orb) orb.inert = false;
+    if (orbLabel) orbLabel.inert = false;
+  }
+  $("open-history").focus();
+}
+
+$("generate-shortlist").addEventListener("click", generateShortlist);
+$("open-history").addEventListener("click", openHistory);
+$("close-history").addEventListener("click", closeHistory);
+$("history-back").addEventListener("click", () => renderHistory(state.runs));
+$("card-scrim").addEventListener("click", () => {
+  if ($("history").classList.contains("open")) closeHistory();
+});
+document.querySelectorAll(".seg button").forEach((button) => {
+  button.addEventListener("click", () => setLens(button.dataset.lens));
+  button.addEventListener("keydown", (event) => {
+    if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return;
+    event.preventDefault();
+    const next = button.dataset.lens === "classroom" ? "four_yes" : "classroom";
+    setLens(next);
+    document.querySelector(`.seg button[data-lens="${next}"]`).focus();
+  });
+});
+const compareButton = $("compare-runs");
+if (compareButton) {
+  compareButton.addEventListener("click", () => {
+    openHistory();
+  });
+}
+const orbButton = $("centik-orb");
+if (orbButton) {
+  orbButton.addEventListener("click", () => {
+    $("live").textContent = "Questions? Tap to talk. This preview does not place a call.";
+  });
+}
+if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+  document.documentElement.style.setProperty("--abw-orb-play", "paused");
+  $("live").textContent = "Motion is reduced. Scores and comparisons show their final values.";
+}
+fetch("/api/runs").then((response) => response.ok ? response.json() : { runs: [] }).then((payload) => {
+  const count = (payload.runs || []).length;
+  const label = $("history-count");
+  if (label) label.textContent = `${count} ${count === 1 ? "run" : "runs"}`;
+}).catch(() => {});
+

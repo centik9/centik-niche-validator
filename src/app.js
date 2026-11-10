@@ -22,8 +22,17 @@ import { parseResolveInput, parseValidateInput } from "./input.js";
 import { createLocationDirectory } from "./locations.js";
 import { createRateLimiter } from "./rate-limit.js";
 import { createRedactor } from "./redact.js";
-import { micrositeAction } from "./microsite-flow.js";
-import { screenCandidates } from "./screen.js";
+import { discoverShortlist } from "./discovery.js";
+import { evaluateService, normalizeLens } from "./lenses.js";
+import { buildProposal, micrositeAction } from "./microsite-flow.js";
+import { loadExtractCatalog, screenCandidates } from "./screen.js";
+import {
+  openRunHistory,
+  snapshotFromDiscovery,
+  snapshotFromProposal,
+  snapshotFromValidation
+} from "./run-history.js";
+import { diffRuns } from "./run-diff.js";
 import { resolveLocation, validateNiche } from "./validator.js";
 
 const PUBLIC_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../public");
@@ -147,6 +156,10 @@ export function createApp(options = {}) {
     now
   });
   const loginLimiter = createRateLimiter({ windowMs: 15 * 60_000, max: 8, clock: now });
+  const history = openRunHistory({
+    store: options.historyStore,
+    filePath: options.historyStorePath || env.RUN_HISTORY_PATH || ""
+  });
   const discoveryCache = options.discoveryCache || createDiscoveryCache({
     filePath: options.discoveryCachePath || env.SUBNICHE_CACHE_PATH || path.join(process.cwd(), "data", "subniche-cache.json"),
     now
@@ -345,6 +358,27 @@ export function createApp(options = {}) {
       send(res, 200, spend.totals());
       return;
     }
+    if (req.method === "GET" && (pathname === "/api/runs" || pathname === "/api/runs/diff")) {
+      if (history.load) await history.load();
+      if (pathname === "/api/runs") {
+        send(res, 200, { runs: history.list(session.email) });
+        return;
+      }
+      const runs = history.list(session.email);
+      const newer = runs.find((row) => row.id === (url.searchParams.get("id") || ""));
+      if (!newer) {
+        send(res, 404, { error: "not_found", message: "That run is not in your history." });
+        return;
+      }
+      const priorId = url.searchParams.get("prior") || newer.prior_id;
+      const older = priorId ? runs.find((row) => row.id === priorId) || history.find(priorId, session.email) : null;
+      send(res, 200, {
+        run: newer,
+        prior: older,
+        diff: older ? diffRuns(newer, older) : null
+      });
+      return;
+    }
     if (req.method === "POST" && pathname === "/api/quote") {
       const contentType = String(req.headers["content-type"] || "");
       if (!contentType.toLowerCase().startsWith("application/json")) {
@@ -373,7 +407,7 @@ export function createApp(options = {}) {
       }
       return;
     }
-    if (!["/api/resolve", "/api/validate", "/api/screen", "/api/microsite"].includes(pathname)) {
+    if (!["/api/resolve", "/api/validate", "/api/screen", "/api/microsite", "/api/discover", "/api/lenses", "/api/runs"].includes(pathname)) {
       send(res, 404, { error: "not_found", message: "Not found." });
       return;
     }
@@ -434,7 +468,75 @@ export function createApp(options = {}) {
       send(res, 200, report);
       return;
     }
+    if (pathname === "/api/discover") {
+      const report = discoverShortlist(json || {}, {
+        extract: json && json.mode === "free" ? (options.extract || loadExtractCatalog()) : null
+      });
+      send(res, 200, report);
+      return;
+    }
+    if (pathname === "/api/lenses") {
+      const service = json && typeof json.service === "string" ? json.service.trim() : "";
+      if (service.length < 2 || service.length > 80) {
+        throw new HttpError(400, "invalid_input", "Enter a service of 2 to 80 characters.");
+      }
+      send(res, 200, evaluateService({
+        service,
+        city: json && typeof json.city === "string" ? json.city : "",
+        state: json && typeof json.state === "string" ? json.state : ""
+      }));
+      return;
+    }
+    if (pathname === "/api/runs") {
+      const service = json && typeof json.service === "string" ? json.service.trim() : "";
+      const city = json && typeof json.city === "string" ? json.city.trim() : "";
+      const stateName = json && typeof json.state === "string" ? json.state.trim() : "";
+      const lens = normalizeLens(json && json.lens);
+      const checkedAt = new Date(now()).toISOString();
+      if (service.length < 2 || city.length < 2 || stateName.length < 2) {
+        throw new HttpError(400, "invalid_input", "A saved run needs a service, city, and state.");
+      }
+      let snapshot = null;
+      const discovered = discoverShortlist({
+        service,
+        lens,
+        mode: "example",
+        candidates: [{ city, state: stateName, service }]
+      });
+      const row = discovered.rows.find((item) => item.city.toLowerCase() === city.toLowerCase() && item.state.toLowerCase() === stateName.toLowerCase());
+      if (row) snapshot = snapshotFromDiscovery(row, { email: session.email, lens, checkedAt });
+      else if (json.location_id && json.keyword && json.subniche_id) {
+        snapshot = snapshotFromProposal(buildProposal(json), { email: session.email, lens, checkedAt });
+      }
+      if (!snapshot) {
+        throw new HttpError(404, "not_found", "No completed check to save. Nothing was invented.");
+      }
+      const saved = await history.record(snapshot);
+      send(res, 200, { run: saved.record, prior: saved.prior, diff: saved.diff, paid_dataforseo_called: false });
+      return;
+    }
     const prepared = pathname === "/api/resolve" ? parseResolveInput(json) : parseValidateInput(json);
+    async function deliverValidation(res, report) {
+      if (pathname === "/api/validate" && report && typeof report === "object") {
+        try {
+          const saved = await history.record(snapshotFromValidation(report, {
+            email: session.email,
+            lens: json.lens,
+            city: prepared.city,
+            state: prepared.state,
+            checkedAt: new Date(now()).toISOString()
+          }));
+          report.history = {
+            id: saved.record.id,
+            prior_id: saved.prior ? saved.prior.id : null,
+            diff: saved.diff
+          };
+        } catch (error) {
+          logger.error(redact(error && (error.stack || error.message) || "history write failed"));
+        }
+      }
+      send(res, 200, report);
+    }
     if (pathname === "/api/validate" && prepared.mode === "live") {
       const decision = await spend.accept(json.spend_token, session.email, prepared, {
         requireAccount: liveEnabled(env),
@@ -474,7 +576,7 @@ export function createApp(options = {}) {
       if (!decision.rerun) {
         const cached = await spend.freshResult(decision.bind);
         if (cached) {
-          send(res, 200, cached);
+          await deliverValidation(res, cached);
           return;
         }
       }
@@ -484,7 +586,7 @@ export function createApp(options = {}) {
       if (report.demand && report.demand.status !== "failed" && report.maps && report.maps.status !== "failed") {
         try {
           const saved = await spend.remember(decision.bind, report);
-          send(res, 200, saved);
+          await deliverValidation(res, saved);
           return;
         } catch (error) {
           logger.error(redact(error && (error.stack || error.message) || "result cache write failed"));
@@ -492,7 +594,7 @@ export function createApp(options = {}) {
           report.maps_depth = report.maps && Number.isInteger(report.maps.requested_depth) ? report.maps.requested_depth : null;
         }
       }
-      send(res, 200, report);
+      await deliverValidation(res, report);
       return;
     }
     if (prepared.mode === "live") {
@@ -529,7 +631,8 @@ export function createApp(options = {}) {
           ? resolveLocation
           : validateNiche;
     const report = await run(prepared, depsFor(prepared.mode));
-    send(res, 200, report);
+    if (pathname === "/api/validate") await deliverValidation(res, report);
+    else send(res, 200, report);
   }
 
   const server = http.createServer((req, res) => {
