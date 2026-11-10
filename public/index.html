@@ -17,11 +17,15 @@
   <ol class="stepper" id="stepper" aria-label="Steps"></ol>
   <div class="layout" id="grid">
         <section class="card area-svc" aria-labelledby="h-svc">
-      <div class="card-h"><span class="step">Step 1</span><h2 id="h-svc">Service</h2><span class="sp"></span><span class="sample">Sample data</span></div>
+      <div class="card-h"><span class="step">Step 1</span><h2 id="h-svc">Service</h2><span class="sp"></span><span class="sample" id="svc-pill">Sample data</span></div>
       <label class="field"><span>Service keyword</span>
         <input id="keyword" type="text" maxlength="80" autocomplete="off" placeholder="plumbing">
       </label>
       <p class="help" id="lb-help">Example data only until a confirmed live check. Type a service. Ranked sub-niches use example demand.</p>
+      <div class="actions" id="specialty-actions" hidden>
+        <button class="btn pri" type="button" id="find-specialties" disabled>Find specialties</button>
+        <button class="btn ghost" type="button" id="find-cancel" hidden>Cancel</button>
+      </div>
       <ol class="lb" id="lb"></ol>
     </section>
     <section class="card area-map" aria-labelledby="h-map">

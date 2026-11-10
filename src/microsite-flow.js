@@ -5,6 +5,7 @@ import { rankByQuery } from "./query-match.js";
 import { HttpError } from "./errors.js";
 import { priceCoverage, priceFor } from "./job-prices.js";
 import { screenCandidates } from "./screen.js";
+import { inTradePhrase, normalizePhrase, slugForLabel } from "./subniche-discovery.js";
 
 export const FLOW_MODEL_ID = "centik-microsite-flow-v1";
 
@@ -261,14 +262,35 @@ function requireKeyword(body) {
   return { keyword };
 }
 
-function selectedSubniche(keyword, subnicheId) {
+function liveSpecialty(keyword, subnicheId, label, suggestion) {
+  return {
+    suggestion: {
+      ...suggestion,
+      ranking_kind: "live_keyword_ideas",
+      ranking_note: "The specialty name came from the United States keyword lookup. Location cards stay on the example shortlist."
+    },
+    subniche: {
+      id: subnicheId,
+      label,
+      price: priceFor(subnicheId),
+      note: "Specialty from the United States keyword-ideas lookup. City cards below are still the example shortlist."
+    }
+  };
+}
+
+function selectedSubniche(keyword, subnicheId, body = {}) {
   const suggestion = suggestSubniches(keyword);
   if (subnicheId === "unranked-keyword" && suggestion.unranked_option) return { suggestion, subniche: suggestion.unranked_option };
   const subniche = suggestion.subniches.find((item) => item.id === subnicheId);
-  if (!subniche) {
-    throw new HttpError(400, "inconsistent_choice", "That sub-niche does not belong to this keyword. Nothing was selected.");
+  if (subniche) return { suggestion, subniche };
+  const label = typeof body.subniche_label === "string" ? body.subniche_label.trim() : "";
+  if (subnicheId === "unranked-keyword" && label && normalizePhrase(label) === normalizePhrase(keyword)) {
+    return liveSpecialty(keyword, subnicheId, label, suggestion);
   }
-  return { suggestion, subniche };
+  if (label && slugForLabel(label) === subnicheId && inTradePhrase(keyword, label)) {
+    return liveSpecialty(keyword, subnicheId, label, suggestion);
+  }
+  throw new HttpError(400, "inconsistent_choice", "That sub-niche does not belong to this keyword. Nothing was selected.");
 }
 
 function samePlace(candidate, location) {
@@ -286,7 +308,7 @@ const SHORTLIST_COVERAGE = {
 
 export async function buildShortlist(body) {
   const context = requireKeyword(body);
-  const { suggestion, subniche } = selectedSubniche(context.keyword, body.subniche_id);
+  const { suggestion, subniche } = selectedSubniche(context.keyword, body.subniche_id, body);
   const screen = await screenCandidates({
     mode: "sample",
     niche: subniche.label,
@@ -375,7 +397,9 @@ export async function buildShortlist(body) {
     ranking_kind: suggestion.ranking_kind,
     ranking_note: suggestion.ranking_kind === "example_suggestion"
       ? "Cards are ordered by the example demand fixture for this sub-niche. The top card is not selected for you."
-      : "No sub-niche profile exists, so this order is an unranked placeholder. It is not a suggested best market.",
+      : suggestion.ranking_kind === "live_keyword_ideas"
+        ? "The specialty name came from the United States keyword lookup. These cards are still the example location set, not live city demand."
+        : "No sub-niche profile exists, so this order is an unranked placeholder. It is not a suggested best market.",
     paid_dataforseo_called: false,
     context,
     subniche,
@@ -386,7 +410,7 @@ export async function buildShortlist(body) {
 
 export function buildProposal(body) {
   const context = requireKeyword(body);
-  const { suggestion, subniche } = selectedSubniche(context.keyword, body.subniche_id);
+  const { suggestion, subniche } = selectedSubniche(context.keyword, body.subniche_id, body);
   const location = PROPOSAL_PLACES.find((item) => item.id === body.location_id);
   if (!location) throw new HttpError(400, "inconsistent_choice", "That location is not in the example shortlist.");
   const demand = demandFor(location, subniche.id, suggestion.ranking_kind);

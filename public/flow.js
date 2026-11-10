@@ -194,6 +194,10 @@ function scheduleSuggestions() {
     try {
       const report = await post("/api/microsite", { action: "subniches", keyword });
       if (requestId !== suggestRequest) return;
+      if (report.needs_confirmation) {
+        status.textContent = report.ranking_note || "Confirm the lookup before a paid request is sent.";
+        return;
+      }
       state.step = "subniches";
       paintStepper();
       showSubniches(report, "");

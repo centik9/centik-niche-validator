@@ -103,6 +103,23 @@ test("example bars are not housing counts, and missing proxies are not zero", as
   assert.deepEqual(withAustin.cards.map((card) => card.example_relative_demand), emergency.cards.map((card) => card.example_relative_demand));
 });
 
+test("a live in-trade specialty can open the example shortlist", async () => {
+  const report = await buildShortlist({
+    keyword: "welding",
+    subniche_id: "pipe-welding",
+    subniche_label: "Pipe welding"
+  });
+  assert.equal(report.paid_dataforseo_called, false);
+  assert.equal(report.example_data, true);
+  assert.equal(report.subniche.id, "pipe-welding");
+  assert.equal(report.subniche.label, "Pipe welding");
+  assert.match(report.ranking_note, /example location set/);
+  await assert.rejects(
+    () => buildShortlist({ keyword: "welding", subniche_id: "drain-cleaning", subniche_label: "Drain cleaning" }),
+    (error) => error.code === "inconsistent_choice"
+  );
+});
+
 test("a proposal must match the keyword and does not authorize spending", () => {
   const proposal = buildProposal({
     ...context,

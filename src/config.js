@@ -37,6 +37,10 @@ export const MAPS_PATH = "/v3/serp/google/maps/live/advanced";
 export const ORGANIC_PATH = "/v3/serp/google/organic/live/advanced";
 export const TRENDS_PATH = "/v3/keywords_data/google_trends/explore/live";
 export const USER_DATA_PATH = "/v3/appendix/user_data";
+export const KEYWORD_IDEAS_PATH = "/v3/dataforseo_labs/google/keyword_ideas/live";
+export const KEYWORD_IDEAS_LIMIT = 40;
+export const US_LOCATION_CODE = 2840;
+export const KEYWORD_IDEAS_SOURCE = "Google keyword ideas via DataForSEO Labs, POST /v3/dataforseo_labs/google/keyword_ideas/live";
 
 export function adsLocationsPath(iso) {
   return `/v3/keywords_data/google_ads/locations/${iso}`;

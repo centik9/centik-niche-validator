@@ -16,5 +16,6 @@ tmp/
 data/spend-ledger.json
 data/result-cache.json
 data/result-cache.json.*
+data/subniche-cache.json
 *.pem
 *.key

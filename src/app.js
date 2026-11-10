@@ -13,7 +13,9 @@ import {
 } from "./config.js";
 import { accessGranted, clearSessionCookie, readSession, sessionCookie, sessionTokenFromRequest, signSession } from "./auth.js";
 import { createLiveTransport } from "./dataforseo.js";
+import { createDiscoveryCache } from "./discovery-cache.js";
 import { HttpError } from "./errors.js";
+import { handleLiveSubniches } from "./live-subniches.js";
 import { accountSpentUsd, createSpendGate } from "./spend.js";
 import { createExampleTransport } from "./example-transport.js";
 import { parseResolveInput, parseValidateInput } from "./input.js";
@@ -145,6 +147,10 @@ export function createApp(options = {}) {
     now
   });
   const loginLimiter = createRateLimiter({ windowMs: 15 * 60_000, max: 8, clock: now });
+  const discoveryCache = options.discoveryCache || createDiscoveryCache({
+    filePath: options.discoveryCachePath || env.SUBNICHE_CACHE_PATH || path.join(process.cwd(), "data", "subniche-cache.json"),
+    now
+  });
   const exampleTransport = options.exampleTransport || createExampleTransport();
   const exampleDirectory = options.exampleDirectory || createLocationDirectory(exampleTransport, { clock: now });
   let liveCache = null;
@@ -392,7 +398,30 @@ export function createApp(options = {}) {
       throw new HttpError(400, "invalid_json", "Request body must be JSON.");
     }
     if (pathname === "/api/microsite") {
-      const report = await (options.micrositeImpl || micrositeAction)(json);
+      if (options.micrositeImpl) {
+        const report = await options.micrositeImpl(json);
+        send(res, 200, report);
+        return;
+      }
+      if (json && json.action === "subniches" && liveEnabled(env)) {
+        const outcome = await handleLiveSubniches({
+          body: json,
+          email: session.email,
+          spend,
+          cache: discoveryCache,
+          transport: liveBundle().transport,
+          credentialsReady: credentialsReady(env),
+          requireAccount: true,
+          checkRateLimit: () => {
+            const perIp = liveLimiter.check(clientIp(req));
+            if (!perIp.allowed) return perIp;
+            return globalLiveLimiter.check("global");
+          }
+        });
+        send(res, outcome.status, outcome.payload, outcome.headers || {});
+        return;
+      }
+      const report = await micrositeAction(json);
       send(res, 200, report);
       return;
     }

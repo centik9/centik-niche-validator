@@ -1,4 +1,6 @@
 import {
+  KEYWORD_IDEAS_LIMIT,
+  KEYWORD_IDEAS_PATH,
   LANGUAGE_CODE,
   MAPS_DEPTH,
   MAPS_DEVICE,
@@ -10,6 +12,7 @@ import {
   SEARCH_VOLUME_PATH,
   TRENDS_PATH,
   UPSTREAM_TIMEOUT_MS,
+  US_LOCATION_CODE,
   USER_DATA_PATH
 } from "./config.js";
 import { MAX_PACKED_KEYWORDS } from "./volume-keywords.js";
@@ -20,6 +23,16 @@ const VOLUME_FIELDS = new Set(["keywords", "location_code", "language_code", "se
 const MAPS_FIELDS = new Set(["keyword", "location_code", "language_code", "depth", "device", "os", "search_this_area"]);
 const ORGANIC_FIELDS = new Set(["keyword", "location_code", "language_code", "depth", "device", "os"]);
 const TRENDS_FIELDS = new Set(["keywords", "location_code", "language_code", "type", "time_range", "item_types"]);
+const KEYWORD_IDEAS_FIELDS = new Set([
+  "keywords",
+  "location_code",
+  "language_code",
+  "closely_variants",
+  "include_serp_info",
+  "include_clickstream_data",
+  "limit",
+  "order_by"
+]);
 const SEARCH_OPERATOR = /\b(?:allinanchor|allintext|allintitle|allinurl|inanchor|intext|intitle|inurl|filetype|define|definition|cache|site|link|info|id)\s*:/i;
 
 function refused(message) {
@@ -119,6 +132,30 @@ export function assertSafeRequest({ method, path, body }) {
     }
     const extra = Object.keys(task).filter((key) => !TRENDS_FIELDS.has(key));
     if (extra.length) refused(`Unexpected Trends fields: ${extra.join(",")}.`);
+    return;
+  }
+  if (method === "POST" && path === KEYWORD_IDEAS_PATH) {
+    const task = assertOneTask(body, "Keyword ideas");
+    if (!Array.isArray(task.keywords) || task.keywords.length !== 1) {
+      refused("Keyword ideas sends exactly one seed keyword.");
+    }
+    assertKeyword(task.keywords[0], "Keyword");
+    if (SEARCH_OPERATOR.test(task.keywords[0])) refused("Keyword ideas keywords must not include search operators.");
+    if (task.location_code !== US_LOCATION_CODE) refused("Keyword ideas location_code must be 2840 (United States).");
+    if (task.language_code !== LANGUAGE_CODE) refused("language_code must be en.");
+    if (task.limit !== KEYWORD_IDEAS_LIMIT) refused(`Keyword ideas limit must be exactly ${KEYWORD_IDEAS_LIMIT}.`);
+    if (task.closely_variants !== true) refused("closely_variants must be true so keyword ideas use phrase match.");
+    if (task.include_serp_info !== false) refused("include_serp_info must be false.");
+    if (task.include_clickstream_data !== false) refused("include_clickstream_data must be false.");
+    if (!Array.isArray(task.order_by) || task.order_by.length !== 1 || task.order_by[0] !== "keyword_info.search_volume,desc") {
+      refused("Keyword ideas order_by must be keyword_info.search_volume,desc.");
+    }
+    assertNoLocationAlias(task);
+    if ("language_name" in task || "offset" in task || "offset_token" in task || "filters" in task || "tag" in task || "ignore_synonyms" in task) {
+      refused("Keyword ideas language_name, offset, filters, and extra modifiers are not sent.");
+    }
+    const extra = Object.keys(task).filter((key) => !KEYWORD_IDEAS_FIELDS.has(key));
+    if (extra.length) refused(`Unexpected keyword ideas fields: ${extra.join(",")}.`);
     return;
   }
   refused("That DataForSEO endpoint is not used by this app.");

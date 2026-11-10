@@ -91,10 +91,93 @@ const state = {
   storedReport: null,
   rerunArmed: false,
   busy: false,
-  mapRegion: null
+  mapRegion: null,
+  specialtyQuote: null
 };
 
 let suggestTimer = 0;
+let specialtyRequest = 0;
+let liveMode = false;
+
+function resetSpecialtyConfirm() {
+  state.specialtyQuote = null;
+  const find = $("find-specialties");
+  const cancel = $("find-cancel");
+  if (find) {
+    find.textContent = "Find specialties";
+    find.disabled = state.keyword.length < 2;
+  }
+  if (cancel) cancel.hidden = true;
+}
+
+function applySubniches(suggestion) {
+  resetSpecialtyConfirm();
+  state.rows = suggestion.subniches || [];
+  $("lb-help").textContent = suggestion.ranking_note || "";
+  const pill = $("svc-pill");
+  if (pill) {
+    pill.textContent = suggestion.example_data === false ? (suggestion.cache_hit ? "Saved US search" : "Live US search") : "Sample data";
+    pill.classList.toggle("cached", suggestion.cache_hit === true);
+  }
+  renderRows();
+  paintStepper();
+}
+
+async function loadExampleSubniches() {
+  const requestId = ++specialtyRequest;
+  const keyword = state.keyword;
+  try {
+    const suggestion = await post("/api/microsite", { action: "subniches", keyword });
+    if (requestId !== specialtyRequest || liveMode) return;
+    applySubniches(suggestion);
+  } catch (error) {
+    if (requestId !== specialtyRequest || liveMode) return;
+    state.rows = [];
+    renderRows();
+    $("lb-help").textContent = error.message || "Example suggestions could not be loaded.";
+  }
+}
+
+async function requestSpecialties(confirming) {
+  if (!liveMode || state.busy || state.keyword.length < 2) return;
+  const requestId = ++specialtyRequest;
+  const keyword = state.keyword;
+  state.busy = true;
+  $("find-specialties").disabled = true;
+  try {
+    const payload = { action: "subniches", keyword };
+    if (confirming && state.specialtyQuote && state.specialtyQuote.keyword === keyword) {
+      payload.spend_token = state.specialtyQuote.spend_token;
+    }
+    const suggestion = await post("/api/microsite", payload);
+    if (requestId !== specialtyRequest) return;
+    if (suggestion.needs_confirmation) {
+      state.specialtyQuote = {
+        keyword,
+        spend_token: suggestion.spend_token,
+        estimated_cost_usd: suggestion.estimated_cost_usd
+      };
+      state.rows = [];
+      renderRows();
+      $("find-specialties").textContent = `Okay, look up specialties (${quoteMoney(suggestion.estimated_cost_usd)})`;
+      $("find-cancel").hidden = false;
+      $("lb-help").textContent = suggestion.ranking_note;
+      return;
+    }
+    applySubniches(suggestion);
+  } catch (error) {
+    if (requestId !== specialtyRequest) return;
+    state.rows = [];
+    state.specialtyQuote = null;
+    renderRows();
+    $("find-specialties").textContent = "Find specialties";
+    $("find-cancel").hidden = true;
+    $("lb-help").textContent = error.message || "The specialty lookup failed. Example trades were not substituted.";
+  } finally {
+    state.busy = false;
+    if ($("find-specialties")) $("find-specialties").disabled = state.keyword.length < 2;
+  }
+}
 
 async function post(pathname, body) {
   const response = await fetch(pathname, {
@@ -135,11 +218,18 @@ function paintStepper() {
 function renderRows() {
   const list = $("lb");
   list.replaceChildren();
+  const maxVolume = state.rows.reduce((max, row) => (
+    Number.isInteger(row.search_volume) ? Math.max(max, row.search_volume) : max
+  ), 0);
   state.rows.forEach((row, index) => {
-    const score = row.composite && row.composite.composite_display ? Number(row.composite.composite_display) : null;
+    const liveVolume = Number.isInteger(row.search_volume);
+    const score = !liveVolume && row.composite && row.composite.composite_display ? Number(row.composite.composite_display) : null;
     const zone = score == null ? null : zoneOf(score);
     const estimated = Boolean(row.composite && (row.composite.estimated || row.composite.pending_review || (row.price && row.price.pending_review)));
     const item = el("li", { class: state.subniche && state.subniche.id === row.id ? "sel" : "" });
+    const width = liveVolume
+      ? Math.max(4, Math.round((row.search_volume / Math.max(maxVolume, 1)) * 100))
+      : (score || 0);
     item.append(
       el("span", { class: "rk" }, [String(index + 1)]),
       el("div", {}, [
@@ -150,18 +240,24 @@ function renderRows() {
         (() => {
           const track = el("div", { class: `bar${estimated ? " dashed" : ""}` });
           const span = el("span");
-          span.style.width = `${score || 0}%`;
-          span.style.background = estimated
-            ? "repeating-linear-gradient(90deg,#fbbf24 0 7px,transparent 7px 11px)"
-            : zoneColor(zone);
+          span.style.width = `${width}%`;
+          span.style.background = liveVolume
+            ? "#22d3ee"
+            : estimated
+              ? "repeating-linear-gradient(90deg,#fbbf24 0 7px,transparent 7px 11px)"
+              : zoneColor(zone);
           track.append(span);
           return track;
         })(),
-        estimated ? el("span", { class: "note" }, [row.price && row.price.pending_review ? "Pending review. This cannot turn the row green." : "Estimate. Capped below a green row."]) : ""
+        liveVolume && row.note
+          ? el("span", { class: "note" }, [row.note])
+          : estimated
+            ? el("span", { class: "note" }, [row.price && row.price.pending_review ? "Pending review. This cannot turn the row green." : "Estimate. Capped below a green row."])
+            : ""
       ]),
       el("div", {}, [
-        el("span", { class: "sc num" }, [score == null ? "-" : String(Math.round(score))]),
-        el("span", { class: "zn" }, [zone ? zone.name : "Not scored"])
+        el("span", { class: "sc num" }, [liveVolume ? row.search_volume.toLocaleString("en-US") : (score == null ? "-" : String(Math.round(score)))]),
+        el("span", { class: "zn" }, [liveVolume ? "US searches/mo" : (zone ? zone.name : "Not scored")])
       ])
     );
     item.addEventListener("click", () => chooseSubniche(row));
@@ -1420,7 +1516,12 @@ async function chooseSubniche(row) {
   state.quote = null;
   clearStored();
   renderRows();
-  const shortlist = await post("/api/microsite", { action: "shortlist", keyword: state.keyword, subniche_id: row.id });
+  const shortlist = await post("/api/microsite", {
+    action: "shortlist",
+    keyword: state.keyword,
+    subniche_id: row.id,
+    subniche_label: row.label
+  });
   state.cards = shortlist.cards || [];
   state.nearbyCards = shortlist.nearby_cards || [];
   state.location = null;
@@ -1449,6 +1550,7 @@ async function chooseLocation(card) {
     action: "proposal",
     keyword: state.keyword,
     subniche_id: state.subniche.id,
+    subniche_label: state.subniche.label,
     location_id: card.id
   });
   renderGauge(
@@ -1588,19 +1690,45 @@ function playReveal(score, display) {
 
 $("keyword").addEventListener("input", () => {
   clearTimeout(suggestTimer);
-  suggestTimer = setTimeout(async () => {
-    state.keyword = $("keyword").value.trim();
-    if (state.keyword.length < 2) {
-      state.rows = [];
-      renderRows();
-      return;
-    }
-    const suggestion = await post("/api/microsite", { action: "subniches", keyword: state.keyword });
-    state.rows = suggestion.subniches || [];
+  specialtyRequest += 1;
+  state.keyword = $("keyword").value.trim();
+  state.subniche = null;
+  resetSpecialtyConfirm();
+  if (state.keyword.length < 2) {
+    state.rows = [];
     renderRows();
+    $("lb-help").textContent = liveMode
+      ? "Type a service of at least 2 characters. Nothing is sent until you confirm a lookup."
+      : "Example data only until a confirmed live check. Type a service. Ranked sub-niches use example demand.";
     paintStepper();
-  }, 250);
+    return;
+  }
+  if (liveMode) {
+    state.rows = [];
+    renderRows();
+    $("lb-help").textContent = `Live mode is on. Finding specialties for "${state.keyword}" sends one paid United States lookup after you confirm. Typing does not send it.`;
+    paintStepper();
+    return;
+  }
+  $("lb-help").textContent = "Preparing example suggestions. This is not a live market search.";
+  suggestTimer = setTimeout(() => { loadExampleSubniches(); }, 250);
 });
+
+const findButton = $("find-specialties");
+if (findButton) {
+  findButton.addEventListener("click", () => {
+    const confirming = Boolean(state.specialtyQuote && state.specialtyQuote.keyword === state.keyword);
+    requestSpecialties(confirming);
+  });
+}
+const findCancel = $("find-cancel");
+if (findCancel) {
+  findCancel.addEventListener("click", () => {
+    specialtyRequest += 1;
+    resetSpecialtyConfirm();
+    $("lb-help").textContent = "Canceled. No DataForSEO request was sent.";
+  });
+}
 
 $("pay-go").addEventListener("click", runPaid);
 $("pay-cancel").addEventListener("click", () => {
@@ -1624,8 +1752,20 @@ $("pay-cancel").addEventListener("click", () => {
 
 fetch("/health").then((response) => response.json()).then((health) => {
   const on = Boolean(health.live_mode);
+  liveMode = on;
+  const actions = $("specialty-actions");
+  if (actions) actions.hidden = !on;
   $("server-status").classList.toggle("on", on);
   $("server-status").querySelector("span").textContent = on ? "Live mode on" : "Sample mode, live checks off";
+  if (on) {
+    state.rows = [];
+    state.subniche = null;
+    resetSpecialtyConfirm();
+    renderRows();
+    $("lb-help").textContent = state.keyword.length >= 2
+      ? `Live mode is on. Finding specialties for "${state.keyword}" sends one paid United States lookup after you confirm. Typing does not send it.`
+      : "Live mode is on. Type a service, then press Find specialties. Nothing is sent until you confirm the price.";
+  }
 }).catch(() => {
   $("server-status").querySelector("span").textContent = "Sample mode, live checks off";
 });

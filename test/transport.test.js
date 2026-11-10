@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { MAPS_PATH, ORGANIC_PATH, SEARCH_VOLUME_PATH, TRENDS_PATH } from "../src/config.js";
+import { KEYWORD_IDEAS_PATH, MAPS_PATH, ORGANIC_PATH, SEARCH_VOLUME_PATH, TRENDS_PATH } from "../src/config.js";
 import { assertSafeRequest, createLiveTransport } from "../src/dataforseo.js";
+import { keywordIdeasBody } from "../src/subniche-discovery.js";
 import { createRedactor } from "../src/redact.js";
 
 const login = "login-user";
@@ -92,6 +93,67 @@ test("refuses billable shapes that would widen or enlarge the query", () => {
   assert.doesNotThrow(() => assertSafeRequest({ method: "GET", path: "/v3/appendix/user_data" }));
   assert.throws(() => assertSafeRequest({ method: "GET", path: "/v3/appendix/user_data", body: [{ money: 1 }] }), /body/);
   assert.throws(() => assertSafeRequest({ method: "GET", path: "/v3/appendix/status" }), /not used/);
+  assert.doesNotThrow(() => assertSafeRequest({ method: "POST", path: KEYWORD_IDEAS_PATH, body: keywordIdeasBody("welding") }));
+  assert.throws(() => assertSafeRequest({
+    method: "POST",
+    path: KEYWORD_IDEAS_PATH,
+    body: [{ ...keywordIdeasBody("welding")[0], location_name: "United States" }]
+  }), /location_name/);
+  assert.throws(() => assertSafeRequest({
+    method: "POST",
+    path: KEYWORD_IDEAS_PATH,
+    body: [{ ...keywordIdeasBody("welding")[0], location_code: 1013962 }]
+  }), /2840/);
+  assert.throws(() => assertSafeRequest({
+    method: "POST",
+    path: KEYWORD_IDEAS_PATH,
+    body: [{ ...keywordIdeasBody("welding")[0], language_code: "es" }]
+  }), /language_code/);
+  assert.throws(() => assertSafeRequest({
+    method: "POST",
+    path: KEYWORD_IDEAS_PATH,
+    body: [{ ...keywordIdeasBody("welding")[0], limit: 700 }]
+  }), /limit/);
+  assert.throws(() => assertSafeRequest({
+    method: "POST",
+    path: KEYWORD_IDEAS_PATH,
+    body: [{ ...keywordIdeasBody("welding")[0], closely_variants: false }]
+  }), /phrase match/);
+  assert.throws(() => assertSafeRequest({
+    method: "POST",
+    path: KEYWORD_IDEAS_PATH,
+    body: [{ ...keywordIdeasBody("welding")[0], include_clickstream_data: true }]
+  }), /clickstream/);
+  assert.throws(() => assertSafeRequest({
+    method: "POST",
+    path: KEYWORD_IDEAS_PATH,
+    body: [{ ...keywordIdeasBody("welding")[0], include_serp_info: true }]
+  }), /serp_info/);
+  assert.throws(() => assertSafeRequest({
+    method: "POST",
+    path: KEYWORD_IDEAS_PATH,
+    body: [{ ...keywordIdeasBody("welding")[0], keywords: ["welding", "plumbing"] }]
+  }), /one seed/);
+  assert.throws(() => assertSafeRequest({
+    method: "POST",
+    path: KEYWORD_IDEAS_PATH,
+    body: [keywordIdeasBody("welding")[0], keywordIdeasBody("hvac")[0]]
+  }), /one task/);
+  assert.throws(() => assertSafeRequest({
+    method: "POST",
+    path: KEYWORD_IDEAS_PATH,
+    body: [{ ...keywordIdeasBody("welding")[0], offset: 40 }]
+  }), /offset/);
+  assert.throws(() => assertSafeRequest({
+    method: "POST",
+    path: "/v3/dataforseo_labs/google/related_keywords/live",
+    body: keywordIdeasBody("welding")
+  }), /not used/);
+  assert.throws(() => assertSafeRequest({
+    method: "POST",
+    path: "/v3/keywords_data/google_ads/keywords_for_keywords/live",
+    body: keywordIdeasBody("welding")
+  }), /not used/);
 });
 
 test("live transport times out once and does not retry or echo credentials", async () => {
