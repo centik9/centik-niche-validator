@@ -20,7 +20,11 @@ export function start() {
   const resultStorePath = configuredStore && configuredStore.trim()
     ? configuredStore.trim()
     : path.join(process.cwd(), "data", "result-cache.json");
-  const server = createApp({ resultStorePath });
+  const configuredHistory = process.env.RUN_HISTORY_PATH;
+  const historyStorePath = configuredHistory && configuredHistory.trim()
+    ? configuredHistory.trim()
+    : path.join(path.dirname(resultStorePath), "run-history.json");
+  const server = createApp({ resultStorePath, historyStorePath });
   server.listen(listenPort, HOST, () => {
     console.log(`centik-niche-validator listening on ${HOST}:${listenPort}`);
   });

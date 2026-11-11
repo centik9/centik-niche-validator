@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
 <title>Centik Niche Validator</title>
 <link rel="stylesheet" href="/styles.css">
 </head>
@@ -12,16 +12,60 @@
     <div class="brand"><p class="mark">Centik</p><h1 class="product">Niche Validator</h1></div>
     <div class="spacer"></div>
     <span class="status" id="server-status"><i></i><span>Sample mode, live checks off</span></span>
+    <button class="hist-btn" type="button" id="open-history" aria-haspopup="dialog" aria-expanded="false" aria-controls="history">History <span class="ct num" id="history-count">0 runs</span></button>
     <a class="signout" href="/logout">Sign out</a>
   </header>
-  <ol class="stepper" id="stepper" aria-label="Steps"></ol>
+  <ol class="stepper" id="stepper" aria-label="Steps">
+    <li><span class="dot">1</span><span>1. Service<small>Keyword</small></span></li>
+    <li><span class="dot">2</span><span>2. Locations<small>Pick a city</small></span></li>
+    <li><span class="dot">3</span><span>3. Microsite<small>After a pick</small></span></li>
+    <li><span class="dot">4</span><span>4. Check<small>Type a service</small></span></li>
+  </ol>
+  <noscript><p class="help">JavaScript is off. You can still read the steps. Typing a service does not require a shortlist. Generating a list and comparing runs needs JavaScript.</p></noscript>
+  <section class="card discover" id="discover" aria-labelledby="h-disc">
+    <div class="card-h"><span class="step free">Before Step 1 · Free</span><h2 id="h-disc">Find pairs to check</h2><span class="sp"></span><span class="sample" id="disc-pill">Sample data</span></div>
+    <div class="disc">
+      <form class="disc-form" id="disc-form">
+        <label class="field"><span>Region</span><input id="disc-region" value="Any US state" autocomplete="off"></label>
+        <label class="field"><span>Service ideas (optional)</span><input id="disc-ideas" value="retaining walls, septic, driveways, crawl space" autocomplete="off"></label>
+        <div class="field"><span>Skip markets already built or in progress</span>
+          <div class="chips"><span class="tag">Murfreesboro</span><span class="tag">Midlothian</span><span class="tag">Coral Gables</span><span class="tag">A&amp;BW</span></div>
+        </div>
+        <button class="btn pri" type="button" id="generate-shortlist">Generate shortlist</button>
+        <p class="free-line" id="shortlist-free">This is free. It does not run a paid check.</p>
+        <progress id="shortlist-progress" max="1" value="0" hidden>Shortlist progress</progress>
+        <div class="srcs"><h3>What the shortlist reads</h3><ol>
+          <li>Census QuickFacts: population, owner-occupancy, median home value</li>
+          <li>Price guides and contractor pages for ticket ranges</li>
+          <li>Contractor first-party pages that name the town</li>
+          <li>Maps place lookups for incumbents (not an ordered pack)</li>
+          <li>Rank Expand flagged niches and Abel's skip list</li>
+        </ol></div>
+      </form>
+      <div>
+        <p class="help" id="shortlist-note">Order follows the research notes. There is no fit score.</p>
+        <ol class="sl" id="shortlist"></ol>
+        <div class="excl"><h3>Not on the list, and why</h3>
+          <ul>
+            <li><span class="verdict-chip v-stop">Hard stop</span> Locksmith, any city. Rank Expand flags it don't-do-first. This holds in both lenses.</li>
+            <li><span class="tag">Skipped</span> Murfreesboro, Midlothian, Coral Gables, and A&amp;BW: already built or in progress.</li>
+          </ul>
+        </div>
+        <p class="picked" id="picked-line" hidden></p>
+      </div>
+    </div>
+  </section>
   <div class="layout" id="grid">
         <section class="card area-svc" aria-labelledby="h-svc">
-      <div class="card-h"><span class="step">Step 1</span><h2 id="h-svc">Service</h2><span class="sp"></span><span class="sample">Sample data</span></div>
+      <div class="card-h"><span class="step">Step 1</span><h2 id="h-svc">Service</h2><span class="sp"></span><span class="sample" id="svc-pill">Sample data</span></div>
       <label class="field"><span>Service keyword</span>
         <input id="keyword" type="text" maxlength="80" autocomplete="off" placeholder="plumbing">
       </label>
       <p class="help" id="lb-help">Example data only until a confirmed live check. Type a service. Ranked sub-niches use example demand.</p>
+      <div class="actions" id="specialty-actions" hidden>
+        <button class="btn pri" type="button" id="find-specialties" disabled>Find specialties</button>
+        <button class="btn ghost" type="button" id="find-cancel" hidden>Cancel</button>
+      </div>
       <ol class="lb" id="lb"></ol>
     </section>
     <section class="card area-map" aria-labelledby="h-map">
@@ -34,7 +78,11 @@
         <li><i class="h2"></i>Warm</li>
         <li><i class="h1"></i>Coldest</li>
       </ul>
-      <p class="help map-cap" id="map-cap">Stylized heat map. Heat is sample demand, not a live street map.</p>
+      <p class="help map-cap" id="map-cap">Stylized heat map. Heat is sample demand, not a live street map. Austin and Cedar Park stay on this map.</p>
+      <label class="field"><span>City and state</span>
+        <input id="city-any" type="text" maxlength="80" autocomplete="off" placeholder="Any US city, state">
+      </label>
+      <p class="help">Any US city can go here. Use this pair fills this field. The map above stays the sample heat map.</p>
       <p class="data-stamp" id="map-stamp" hidden></p>
       <ul class="locs" id="locs"></ul>
     </section>
@@ -78,6 +126,24 @@
         </div>
       </div>
     </section>
+  <section class="card area-rules" aria-labelledby="h-rules">
+    <div class="card-h"><h2 id="h-rules">Rank Expand rules</h2><span class="sp"></span><span class="sample" id="rules-pill">Sample data</span></div>
+    <div class="lens-top">
+      <div class="seg" role="radiogroup" aria-label="Rank Expand lens">
+        <button type="button" role="radio" id="lens-classroom" data-lens="classroom" aria-checked="true">Classroom floor</button>
+        <button type="button" role="radio" id="lens-four" data-lens="four_yes" aria-checked="false">Jesse's four-yes test</button>
+      </div>
+      <p class="help lens-aside">Two separate tests. Never averaged, never one badge.</p>
+    </div>
+    <p class="lens-help" id="lens-help">Pick a service to see this test. This test is separate from the market score.</p>
+    <div class="rules-grid" id="rules-grid">
+      <div>
+        <h3>Same data, both lenses</h3>
+        <dl id="rules-raw"></dl>
+      </div>
+      <div id="rules-out"></div>
+    </div>
+  </section>
     <section class="card area-est" id="est-card" aria-labelledby="h-est">
       <div class="card-h"><h2 id="h-est">Estimates</h2><span class="est-tag">EST.</span><span class="sp"></span><span class="sample" id="est-pill">Sample data</span></div>
       <div class="kpis" id="kpis"></div>
@@ -97,6 +163,10 @@
         <button class="btn ghost" type="button" id="pay-cancel" disabled>Cancel</button>
       </div>
       <p class="help" id="paid-note"></p>
+      <div class="prev-run" id="compare-slot" hidden>
+        <span id="compare-caption"></span>
+        <button class="btn ghost sm" type="button" id="compare-runs">Compare runs</button>
+      </div>
     </section>
     <section class="card area-site" aria-labelledby="h-site">
       <div class="card-h"><span class="step">Step 3</span><h2 id="h-site">Microsite sketch</h2><span class="sp"></span><span class="sample">Suggestion only</span></div>
@@ -115,6 +185,23 @@
   <p class="foot">Fixture numbers keep a Sample data pill. A paid check runs only after Okay.</p>
   <p class="sr" aria-live="polite" id="live"></p>
 </div>
+<section class="card history" id="history" role="dialog" aria-modal="true" aria-labelledby="h-history" hidden>
+  <div class="card-h">
+    <button class="btn ghost sm" type="button" id="history-back" hidden>History</button>
+    <h2 id="h-history">History</h2>
+    <span class="sp"></span>
+    <button class="enlarge-close" type="button" id="close-history">Close</button>
+  </div>
+  <p class="help" id="history-lead">Every saved check, newest first, grouped by service, city, and map depth.</p>
+  <div id="history-list" class="history-list"></div>
+  <div id="diff" class="diff" hidden></div>
+</section>
+<button type="button" class="nocotel-orb-pill" id="centik-orb" aria-label="Questions? Tap to talk">
+  <span class="nocotel-orb-disc" aria-hidden="true"></span>
+</button>
+<button type="button" class="abw-orb-lbl" id="centik-orb-lbl" tabindex="-1" aria-hidden="true">
+  <span class="l">Questions? Tap to talk</span><span class="s">Tap to talk</span>
+</button>
 <div class="card-scrim" id="card-scrim" hidden></div>
 <script src="/us-heat-map.js"></script>
 <script src="/dashboard.js"></script>

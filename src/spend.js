@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { MAPS_PATH, ORGANIC_PATH, SEARCH_VOLUME_PATH, TRENDS_PATH } from "./config.js";
+import { KEYWORD_IDEAS_PATH, MAPS_PATH, ORGANIC_PATH, SEARCH_VOLUME_PATH, TRENDS_PATH } from "./config.js";
 import { openResultStore } from "./result-store.js";
 import { VOLUME_KEYWORD_SET_ID } from "./volume-keywords.js";
 
@@ -10,6 +10,11 @@ export const MAPS_COST_USD = 0.002;
 export const ORGANIC_COST_USD = 0.002;
 export const TRENDS_COST_USD = 0.011;
 export const QUERY_COST_USD = 0.105;
+export const KEYWORD_IDEAS_TASK_USD = 0.012;
+export const KEYWORD_IDEAS_ITEM_USD = 0.00012;
+// Labs bills $0.012 + $0.00012 per returned item. Forty items cost $0.0168.
+// This ledger stores thousandths of a dollar, so the cap reserves $0.017.
+export const KEYWORD_IDEAS_COST_USD = 0.017;
 export const MAPS_LIVE_DEPTH = 100;
 export const ORGANIC_LIVE_DEPTH = 10;
 export const RESULT_CACHE_VERSION = "microsite-v2";
@@ -186,8 +191,19 @@ export function createSpendGate(options = {}) {
       maps_cost_usd: MAPS_COST_USD,
       organic_cost_usd: ORGANIC_COST_USD,
       trends_cost_usd: TRENDS_COST_USD,
+      keyword_ideas_cost_usd: KEYWORD_IDEAS_COST_USD,
       entries: entries.map((entry) => ({ ...entry }))
     };
+  }
+
+  function discoveryCalls() {
+    return [{
+      method: "POST",
+      path: KEYWORD_IDEAS_PATH,
+      purpose: "Google keyword ideas live, United States, limit 40, phrase match",
+      limit: 40,
+      estimated_cost_usd: KEYWORD_IDEAS_COST_USD
+    }];
   }
 
   async function accountPosition(costUsd) {
@@ -360,6 +376,69 @@ export function createSpendGate(options = {}) {
     return fallback;
   }
 
+  async function quoteDiscovery(email, keyword, locationCode, flags = {}) {
+    await load();
+    if (!tokenSecret) {
+      const error = new Error("SPEND_TOKEN_SECRET must be set before a paid check can be confirmed.");
+      error.code = "spend_not_configured";
+      error.status = 503;
+      throw error;
+    }
+    const bind = bindDiscoveryRequest(email, keyword, locationCode);
+    const account = flags.requireAccount ? await accountPosition(KEYWORD_IDEAS_COST_USD) : null;
+    const signed = signToken(bind);
+    const state = totals();
+    return {
+      calls: discoveryCalls(),
+      estimated_cost_usd: KEYWORD_IDEAS_COST_USD,
+      spent_usd: account ? account.spent_usd : state.spent_usd,
+      remaining_usd: account ? account.remaining_usd : state.remaining_usd,
+      cap_usd: state.cap_usd,
+      baseline_usd: account ? account.baseline_usd : baselineUsd,
+      account_total_spent_usd: account ? account.account_total_spent_usd : null,
+      account_checked: Boolean(account),
+      spend_token: signed.token,
+      expires_at: new Date(signed.exp).toISOString(),
+      keyword: bind.keyword,
+      location_code: bind.location_code
+    };
+  }
+
+  async function acceptDiscovery(token, email, keyword, locationCode, flags = {}) {
+    const parsed = readToken(token);
+    if (!parsed.ok) return parsed;
+    const bind = bindDiscoveryRequest(email, keyword, locationCode);
+    if (!sameBind(parsed.body.bind, bind)) return { ok: false, reason: "mismatched" };
+    if (flags.requireAccount) {
+      try {
+        await accountPosition(KEYWORD_IDEAS_COST_USD);
+      } catch (error) {
+        return { ok: false, reason: error.code || "spend_account_unavailable", message: error.message };
+      }
+    }
+    if (used.has(parsed.body.nonce)) return { ok: false, reason: "reused" };
+    used.add(parsed.body.nonce);
+    return { ok: true, bind, nonce: parsed.body.nonce, estimated_cost_usd: KEYWORD_IDEAS_COST_USD };
+  }
+
+  async function recordDiscovery({ email, keyword, costUsd, costSource }) {
+    const reported = typeof costUsd === "number" && Number.isFinite(costUsd) ? dollars(milli(costUsd)) : KEYWORD_IDEAS_COST_USD;
+    entries.push({
+      at: new Date(now()).toISOString(),
+      user: String(email || "").trim().toLowerCase(),
+      niche: keyword,
+      market: "United States",
+      calls: [{
+        endpoint: `POST ${KEYWORD_IDEAS_PATH}`,
+        cost_usd: reported,
+        cost_source: costSource === "provider" ? "provider" : "estimate_fallback"
+      }],
+      cost_usd: reported
+    });
+    await persist();
+    return reported;
+  }
+
   async function record(report, email, prepared) {
     const callEntry = (endpoint, section, fallback) => ({
       endpoint,
@@ -385,5 +464,28 @@ export function createSpendGate(options = {}) {
     return cost;
   }
 
-  return { load, ready: load(), totals, quote, inspect, accept, freshResult, remember, record, accountPosition };
+  return {
+    load,
+    ready: load(),
+    totals,
+    quote,
+    inspect,
+    accept,
+    freshResult,
+    remember,
+    record,
+    accountPosition,
+    quoteDiscovery,
+    acceptDiscovery,
+    recordDiscovery
+  };
+}
+
+export function bindDiscoveryRequest(email, keyword, locationCode) {
+  return {
+    purpose: "subniche_discovery",
+    email: String(email || "").trim().toLowerCase(),
+    keyword: String(keyword || "").trim().toLowerCase(),
+    location_code: locationCode
+  };
 }

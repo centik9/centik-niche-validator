@@ -6,12 +6,56 @@ Version 0.1.0 is safe to run with no credentials. Live DataForSEO calls are off 
 
 ## Example decision flow
 
-The page is a four-step example. It does not call Census, USDA, NOAA, or DataForSEO.
+With live mode off, the page is a four-step example. It does not call Census, USDA, NOAA, or DataForSEO.
 
-1. Type a service keyword only. City, state, and country are not collected. After a short pause, plumbing keywords show 20 sub-niches. Each priced row has a national published job-price range, with the source name, URL, and access date. Demand and competition stay example fixtures. One composite, from demand 40%, competition 30% (fewer competitors score higher), and margin 30%, sorts the rows green, then yellow, then red. A sub-niche with no published range says "Price range missing" and its composite is withheld. Any other keyword stays a single unranked label.
+1. Type a service keyword only. City, state, and country are not collected. After a short pause, plumbing keywords show 20 example sub-niches. A trade keyword such as welding or HVAC shows the built-in eight-trade example list, with the matching trade first. Each priced row has a national published job-price range, with the source name, URL, and access date. Demand and competition stay example fixtures. One composite, from demand 40%, competition 30% (fewer competitors score higher), and margin 30%, sorts the rows green, then yellow, then red. A sub-niche with no published range says "Price range missing" and its composite is withheld. Any other keyword stays a single unranked label. The rows are labeled as example data.
 2. Choosing a sub-niche loads a fixed United States example shortlist. It is not filtered by a starting city, and it is not exhaustive national coverage. Cards use a fixture demand bar. The searches/competitors line is `example relative demand × 12` and `max(3, round(28 − demand / 4))`. Those figures are not Census housing and not keyword volume. Expand a card for sample housing, soil, and drought proxies, or for a missing-coverage note. The top card is not selected for you.
 3. Choose a location. The sketch puts one 0–100 gauge at the top, then the demand, competition, and margin breakdown. The gauge is red below 30, yellow from 30 up to but not including 60, and green at 60 or higher. The yes/no gate states whether the composite clears green. The sketch also proposes a name, four pages, a headline, and a `.example` domain. Availability is not checked. Yes only stores a prototype choice. It does not create a site, buy a domain, or authorize spending.
 4. After yes, the paid check stays off. Cities in the example gazetteer can run the existing example deep check and its combined heuristic index. Counties, metros, and cities outside that gazetteer do not receive an invented score.
+
+## Live Step 1 specialties
+
+When `DATAFORSEO_LIVE=true` and both credentials are set, Step 1 does not use the example lists. Typing still does not call DataForSEO. Press Find specialties, read the price, then press Okay.
+
+The lookup is one task:
+
+`POST /v3/dataforseo_labs/google/keyword_ideas/live`
+
+- One seed keyword, the normalized service the person typed.
+- `location_code` `2840` (United States). Step 1 still has no city. The later paid check measures the city that gets picked.
+- `language_code` `en`.
+- `closely_variants` `true` (phrase match, not broad match).
+- `limit` `40`.
+- `include_serp_info` `false` and `include_clickstream_data` `false`. Clickstream data would double the price, so it is refused.
+- Ordered by `keyword_info.search_volume,desc`.
+
+DataForSEO Labs bills `$0.012` per task plus `$0.00012` per returned item. Forty items cost `$0.0168`. The spend ledger stores thousandths of a dollar, so the cap reserves `$0.017` (`KEYWORD_IDEAS_COST_USD`). The ledger stores the task cost DataForSEO returns when that number is present.
+
+Ideas that name a different trade (plumbing on a welding search, electrician or locksmith on an HVAC search, and the same kind of cross-trade phrase) are removed. Word-order and welder/welding twins are clustered, and the list is ranked by United States search volume. If fewer than three in-trade ideas have a measured volume, the note says so. If none do, the list is empty. The eight-trade example catalog is not added and is not returned as if it were live.
+
+A confirmed lookup is cached by normalized keyword and location code (`welding|2840|keyword-ideas-v1`). The same keyword, including different capitalization, is served from that cache at `$0` and does not call DataForSEO. The cache file defaults to `./data/subniche-cache.json`. A different keyword is a new confirmation. Nothing is sent without the one-time spend token, and a token from the city check cannot be reused here.
+
+## Run history
+
+Every completed check for the signed-in user is appended to a JSON file, the same kind of store as the result cache. The default path is `run-history.json` beside `RESULT_STORE_PATH`. Render's free disk does not survive sleep, so point `RUN_HISTORY_PATH` and `RESULT_STORE_PATH` at storage that does. A row stores the date, service, city, state, volume, map sample, competition, market score, and the zone chip (No, Low, Medium, High, or Max). That zone chip is the grade. There is no letter grade. The active lens is stored too. Credentials and spend tokens are not.
+
+Runs group by service, city, state, map depth, and check version. A shallower map depth stays in its own group. It is not reused for a depth 100 check and it is not compared with one. History is a top-bar button and opens in the same enlarge overlay. A repeat of the same group can open a side-by-side compare. A moved number reads `up 6` or `down 6`. A range stays a range. If the lenses differ, the kinds of number differ, or a field is missing, the change reads `Not comparable`.
+
+## Two lenses
+
+Classroom floor and Jesse's four-yes test use the same inputs and return two verdicts. They are not averaged and they are not one badge. The sample water heater repair row can pass Classroom floor and fail the four-yes test on the same sample ticket. That tension stays visible.
+
+Classroom floor follows the Microsite Empire notes: urgent one-off work people phone about, and a job value of at least $500. The $1,000 to $2,000 line is guidance, not a second hard fail. The lens fails only when a published job total is under $500. Non-urgent work is Caution. Emergency locksmith is the course example of the floor and a flagged niche, so both lenses show Hard stop and never Pass.
+
+Jesse's four-yes test, in order: a ticket of $5,000 or more, about 1,500 operators in the state, a weak page one for "best [service] in [location]", and sponsored ads. The operator row is the directory test. It is shown and it does not by itself fail a microsite. Missing data is Not enough evidence, not a no. The market-score dial stays a separate Demand, Competition, and Margin score.
+
+The lens verdict has to be on screen before Step 4 can be armed. Hard stop keeps Step 4 locked. You can still type a service and skip the shortlist.
+
+## Discovery shortlist
+
+`Generate shortlist` sits above the grid, labeled Before Step 1. It is free and it does not call DataForSEO. It ranks city and service pairs from the Nov 6 and Nov 10 research notes and, in free mode, from the bundled Census extract: owner-occupancy, population when a note has it, a population-edge label, a price-guide ticket, and Places or contractor-page checks. Housing age stays Not fetched. It is not in that method and it is not used to rank. There is no fit score. An unmeasured field says Not on file or Not fetched. The tool does not invent search volume, CPC, review counts, or ranks.
+
+The worked example puts Bella Vista retaining walls first and keeps Lancaster septic visible as the fallback if that map pack is dense, then Grass Valley, Battle Ground, and Leland. Other pairs are ranked with the same rules when a measurement is on file. `Use this pair` fills the service and the city field only. The heat map stays the Austin and Cedar Park sample. The city field accepts any US city name. Paid DataForSEO stays behind the spend confirmation and the $10 cap.
 
 ## Free pre-screen
 
@@ -133,6 +177,8 @@ Copy the names from `.env.example`. Put real values in the host environment, not
 | `DATAFORSEO_SPENT_BASELINE_USD` | Go-live account spend, set once. DataForSEO's free `GET /v3/appendix/user_data` has `money.total` and `money.balance`, not `money.total_spent`, so spend is `total − balance` unless `total_spent` is present. The production baseline is the derived value `1.17145`. The check is current spend minus this baseline, plus the quote. If this is missing, or that free call fails, or the fields are not finite numbers, live runs are refused. |
 | `SPEND_LEDGER_PATH` | JSON ledger of paid calls. Default `./data/spend-ledger.json`. Each row stores the timestamp, user, niche, market, calls, and the cost DataForSEO returned. |
 | `RESULT_STORE_PATH` | JSON file of scored map and search results. The server defaults to `./data/result-cache.json` when this is unset. A hit for the same niche, city, check version, and a map depth at least as deep as the current check is quoted at $0 and does not call DataForSEO. A shallower or older check version is not reused. Results stay until someone uses Rerun paid check. |
+| `SUBNICHE_CACHE_PATH` | JSON file of Step 1 specialty lookups. Default `./data/subniche-cache.json`. A hit for the same normalized keyword and United States location is served at $0. |
+| `RUN_HISTORY_PATH` | JSON file of completed checks for signed-in users. Default is `run-history.json` beside `RESULT_STORE_PATH`. Same disk caveat. |
 | `SPEND_TOKEN_SECRET` | HMAC key for the one-time spend token. There is no default. |
 | `ALLOWED_EMAILS` | Comma-separated emails that may sign in. Default `team@centik.ai`. |
 | `TEAM_ACCESS_CODE_HASH` | scrypt hash of the access code. Generate it with `node scripts/hash-access-code.mjs`. The plain code is not stored. |
@@ -141,11 +187,11 @@ Copy the names from `.env.example`. Put real values in the host environment, not
 
 There is no `.env` loader. A file named `.env` is gitignored so it is not committed; this process does not read it. Inject the variables in the shell or the host.
 
-Live calls use HTTP Basic auth and are not retried. The transport allows the uncharged Ads, Maps, and Trends location lists, one packed search-volume live task, the Maps live call, one organic live call at depth 10, and one Trends explore live task. It refuses every other DataForSEO path. It refuses `location_name`, `location_coordinate`, custom date ranges, `search_partners: true`, more than 20 volume keywords, any Maps depth other than 100, organic depth other than 10, organic search operators, `load_async_ai_overview`, `calculate_rectangles`, and `people_also_ask_click_depth`. Trends sends one keyword, `type` `web`, and `time_range` `past_12_months`. Request bodies that contain the login or password are refused before send. Logs and error responses pass through a redactor for those values and for `Authorization: Basic` tokens.
+Live calls use HTTP Basic auth and are not retried. The transport allows the uncharged Ads, Maps, and Trends location lists, one packed search-volume live task, the Maps live call, one organic live call at depth 10, one Trends explore live task, and one keyword-ideas live task for Step 1. It refuses every other DataForSEO path, including related-keywords and keywords-for-keywords. It refuses `location_name`, `location_coordinate`, custom date ranges, `search_partners: true`, more than 20 volume keywords, any Maps depth other than 100, organic depth other than 10, organic search operators, `load_async_ai_overview`, `calculate_rectangles`, and `people_also_ask_click_depth`. Trends sends one keyword, `type` `web`, and `time_range` `past_12_months`. Keyword ideas send one seed, `language_code` `en`, location code `2840`, limit `40`, phrase match, and no clickstream or SERP add-on. Request bodies that contain the login or password are refused before send. Logs and error responses pass through a redactor for those values and for `Authorization: Basic` tokens.
 
 Location lists are cached in process memory for six hours. The cache is lost on restart. Those GET requests are not charged and are not written to the spend ledger.
 
-A live check is $0.105: Google Ads search volume live $0.09, Maps live advanced depth 100 $0.002, Google organic live depth 10 $0.002, and Google Trends explore live $0.011. Those rates are `ADS_COST_USD`, `MAPS_COST_USD`, `ORGANIC_COST_USD`, and `TRENDS_COST_USD` in `src/spend.js`, and `QUERY_COST_USD` is 0.105. Nothing is sent until a signed-in person gets a quote from `POST /api/quote` and sends that one-time token to `POST /api/validate`. The token is HMAC-signed with `SPEND_TOKEN_SECRET`, bound to the user and the normalized niche, city, state, country, location codes, and whether this confirmation is a rerun, and it expires in 5 minutes. A used token is remembered in memory. A saved result for the same niche and city is reused when its check version matches and its map depth is at least the current depth (100). The saved record stores the full scored report and the captured-at time. A depth-20 result, a volume-only result, or a different check version is not reused. A deeper saved result can satisfy the current check. There is no 24 hour expiry. Rerun paid check is the refresh: it asks for a new quote at $0.105, still requires Okay on the confirm card, and then replaces the saved result. The four paid calls run in parallel after confirm. The ledger adds the task cost DataForSEO returns. `GET /api/spend` returns the totals and requires the session.
+A live city check is $0.105: Google Ads search volume live $0.09, Maps live advanced depth 100 $0.002, Google organic live depth 10 $0.002, and Google Trends explore live $0.011. Those rates are `ADS_COST_USD`, `MAPS_COST_USD`, `ORGANIC_COST_USD`, and `TRENDS_COST_USD` in `src/spend.js`, and `QUERY_COST_USD` is 0.105. Step 1 specialty discovery is not part of that $0.105. It is a separate keyword-ideas confirmation at up to $0.017. Nothing is sent until a signed-in person gets a quote from `POST /api/quote` and sends that one-time token to `POST /api/validate`. The token is HMAC-signed with `SPEND_TOKEN_SECRET`, bound to the user and the normalized niche, city, state, country, location codes, and whether this confirmation is a rerun, and it expires in 5 minutes. A used token is remembered in memory. A saved result for the same niche and city is reused when its check version matches and its map depth is at least the current depth (100). The saved record stores the full scored report and the captured-at time. A depth-20 result, a volume-only result, or a different check version is not reused. A deeper saved result can satisfy the current check. There is no 24 hour expiry. Rerun paid check is the refresh: it asks for a new quote at $0.105, still requires Okay on the confirm card, and then replaces the saved result. The four paid calls run in parallel after confirm. The ledger adds the task cost DataForSEO returns. `GET /api/spend` returns the totals and requires the session.
 
 Live competition does not use `max(3, round(28 − demand / 4))`. The live index is `round(0.5 × listing room + 0.3 × share with no website + 0.2 × (100 − review pressure))`. Listing room is `round(100 × (100 − min(unique organic listings, 100)) / 100)`, so 40 listings scores differently from 90. The no-website share is that count divided by the deduped organic count. Review pressure is the average `votes_count` in the sample, capped at 100.
 
@@ -257,7 +303,7 @@ Example location coverage is a small gazetteer: several Springfields, both Portl
 - Health check: `GET /health`
 - Bind is `0.0.0.0:$PORT`. Render sets `PORT`.
 - These keys are `sync: false` and have no value in the file: `DATAFORSEO_LIVE`, `DATAFORSEO_LOGIN`, `DATAFORSEO_PASSWORD`, `SPEND_CAP_USD`, `SPEND_TOKEN_SECRET`, `SESSION_SECRET`, `TEAM_ACCESS_CODE_HASH`, `ALLOWED_EMAILS`. Set them in the Dashboard. Do not commit them.
-- The free plan's disk is ephemeral, so `./data/spend-ledger.json` and `./data/result-cache.json` reset when the service sleeps, restarts, or redeploys. The cap still applies for the life of that instance. This repo does not add a Render Postgres or Key Value instance. The result store is the `load` / `find` / `save` interface in `src/result-store.js`. The file store is what tests and a local preview use. For a production host that already has storage surviving restart, set `RESULT_STORE_PATH` to that path, or pass a `resultStore` into `createSpendGate`. Do not buy a new database for this cache.
+- The free plan's disk is ephemeral, so `./data/spend-ledger.json`, `./data/result-cache.json`, `./data/run-history.json`, and `./data/subniche-cache.json` reset when the service sleeps, restarts, or redeploys. The cap still applies for the life of that instance. This repo does not add a Render Postgres or Key Value instance. The result store is the `load` / `find` / `save` interface in `src/result-store.js`. Run history uses the same kind of file store, in the same directory by default. The file store is what tests and a local preview use. For a production host that already has storage surviving restart, set `RESULT_STORE_PATH`, `RUN_HISTORY_PATH`, and `SUBNICHE_CACHE_PATH` to paths that survive restart, or pass a `resultStore` into `createSpendGate`. Do not buy a new database for this cache.
 
 ## One cheap live check
 
@@ -265,8 +311,8 @@ Do this once, after the secrets are set, and not from a test:
 
 1. Set `DATAFORSEO_LIVE=true`, `DATAFORSEO_LOGIN`, `DATAFORSEO_PASSWORD`, `SPEND_TOKEN_SECRET`, `SESSION_SECRET`, and `TEAM_ACCESS_CODE_HASH`. Leave `SPEND_CAP_USD` at 10.
 2. Sign in at `/login`.
-3. Open one keyword in one city and press the paid-check button once.
-4. Expect four paid calls: Google Ads search volume, Maps at depth 100, organic at depth 10, and Google Trends explore. `GET /api/spend` should show the provider task costs, about $0.105 if DataForSEO bills the list prices. Maps depth 100 is still $0.002. Organic depth 10 is $0.002. Trends explore live is $0.011.
+3. Open one keyword in one city and press the paid-check button once. Step 1 is separate: Find specialties, then Okay, sends one keyword-ideas task at up to $0.017 and caches that keyword for the United States. It does not run the four-call city check.
+4. Expect four paid calls for the city check: Google Ads search volume, Maps at depth 100, organic at depth 10, and Google Trends explore. `GET /api/spend` should show the provider task costs, about $0.105 if DataForSEO bills the list prices. Maps depth 100 is still $0.002. Organic depth 10 is $0.002. Trends explore live is $0.011. A Step 1 row is the keyword-ideas endpoint, about $0.0168 before the ledger rounds it to $0.017.
 5. Run that same keyword and city again. The saved result should answer it at $0, with the original captured-at time, and the spend total should stay the same. Rerun paid check is a new $0.105 confirmation. On the free Render disk that file is lost when the service sleeps.
 
 Location-list lookups, including the Google Trends location list used to choose city, metro, state, or national, are free and cached. They are not part of the $0.105.
