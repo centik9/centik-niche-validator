@@ -202,7 +202,7 @@ function paintStepper() {
     ["1. Service", state.subniche ? state.subniche.label : "Keyword"],
     ["2. Locations", state.location ? `${state.location.name}, ${state.location.state}` : "Pick a city"],
     ["3. Microsite", state.proposal ? "Sketch ready" : "After a city"],
-    ["4. Check", state.lensReport && state.lensReport.hard_stop ? "Hard stop" : state.rerunArmed ? "Confirm the charge" : state.storedReport ? "Saved result" : state.quote ? "Waiting for your okay" : "Needs a lens"]
+    ["4. Check", state.lensReport && state.lensReport.hard_stop ? "Hard stop" : state.rerunArmed ? "Confirm the charge" : state.storedReport ? "Saved result" : state.quote ? "Waiting for your okay" : "Type a service"]
   ];
   const current = state.quote || state.storedReport ? 3 : state.proposal ? 2 : state.cards.length ? 1 : 0;
   $("stepper").replaceChildren(...steps.map(([label, detail], index) => el("li", {
@@ -1216,7 +1216,7 @@ function renderQuote(quote, proposal) {
   go.classList.toggle("money", stored);
   go.classList.toggle("pri", !stored);
   const locked = Boolean(state.lensReport && state.lensReport.hard_stop);
-  const ready = stored ? (!state.busy && (state.rerunArmed ? Boolean(quote) : Boolean(state.storedReport))) : Boolean(quote) && !state.busy && !locked && Boolean(state.lensReport);
+  const ready = !locked && (stored ? (!state.busy && (state.rerunArmed ? Boolean(quote) : Boolean(state.storedReport))) : Boolean(quote) && !state.busy && Boolean(state.lensReport));
   go.disabled = !ready;
   const showCancel = stored ? state.rerunArmed : Boolean(quote);
   $("pay-cancel").hidden = !showCancel;
@@ -1225,9 +1225,11 @@ function renderQuote(quote, proposal) {
   const breakdown = chargeCalls.length
     ? `${chargeCalls.map((call) => `${call.purpose} ${quoteMoney(call.estimated_cost_usd)}`).join(". ")}. Total ${quoteMoney(chargeCost)}. Location lists are free and are not in this cost.`
     : "";
-  $("paid-note").textContent = stored
-    ? "This starts a new paid DataForSEO run and will be charged."
-    : breakdown;
+  $("paid-note").textContent = locked
+    ? "Hard stop. Step 4 stays locked."
+    : stored
+      ? "This starts a new paid DataForSEO run and will be charged."
+      : breakdown;
   const heading = $("h-paid");
   if (heading) heading.textContent = stored && !state.rerunArmed ? "Saved check" : "Confirm paid check";
   const pill = $("paid-pill");
@@ -1940,6 +1942,15 @@ function verdictWord(verdict) {
   return "Not enough evidence";
 }
 
+function verdictDetail(verdict, lensId) {
+  if (verdict === "pass") return "Meets this test.";
+  if (verdict === "caution") return "Job value can clear $500. This is not urgent one-off work.";
+  if (verdict === "hard_stop") return "Step 4 stays locked.";
+  if (verdict === "fail") return "This test does not pass.";
+  if (lensId === "four_yes") return "Ticket, page one, or ads were not measured. Missing is not a no.";
+  return "A published job total was not on file. Missing is not a no.";
+}
+
 function markGlyph(mark) {
   if (mark === "yes") return { cls: "yes", glyph: "\u2713", word: "Yes" };
   if (mark === "no") return { cls: "no", glyph: "\u2715", word: "No" };
@@ -2016,20 +2027,19 @@ function renderRules() {
     ["Rank Expand flagged niche", report.hard_stop ? "Yes" : "No"]
   ];
   rows.forEach(([name, value]) => raw.append(el("dt", {}, [name]), el("dd", {}, [value])));
-  const verdict = el("p", {}, [
+  const verdict = el("p", { class: "lens-readout" }, [
     el("span", { class: `verdict-chip v-${active.verdict === "pass" ? "pass" : active.verdict === "fail" || active.verdict === "hard_stop" ? "fail" : "unk"}` }, [verdictWord(active.verdict)]),
-    " ",
-    active.verdict === "pass" ? "Meets this test." : active.verdict === "caution" ? "Job value can clear $500. This is not urgent one-off work." : active.verdict === "hard_stop" ? "Hard stop. Step 4 stays locked." : active.verdict === "fail" ? "This test does not pass." : "Not enough evidence."
+    el("span", { class: "lens-detail" }, [verdictDetail(active.verdict, active.id)])
   ]);
   if (other && other.verdict !== active.verdict) {
-    verdict.append(el("span", { class: "help" }, [` ${other.label}: ${verdictWord(other.verdict)}. These are two different tests.`]));
+    verdict.append(el("span", { class: "help lens-other" }, [`${other.label}: ${verdictWord(other.verdict)}. These are two different tests.`]));
   }
   const list = el("ol", { class: "crit" });
   (active.rows || []).forEach((row) => {
     const mark = markGlyph(row.mark);
     list.append(el("li", {}, [
       el("span", { class: `mark ${mark.cls}`, "aria-hidden": "true" }, [mark.glyph]),
-      el("span", {}, [el("b", {}, [row.label]), el("small", { class: "help" }, [row.note || row.evidence || ""])]),
+      el("span", { class: "crit-copy" }, [el("b", {}, [row.label]), " ", el("small", { class: "help" }, [row.note || row.evidence || ""])]),
       el("span", {}, [mark.word])
     ]));
   });
@@ -2168,19 +2178,22 @@ function renderHistory(runs) {
         : `Maps depth ${sample.maps_depth == null ? "not stored" : sample.maps_depth} · ${sample.check_version || "preview"}`])
     ]);
     const table = el("table", { class: "run-table" });
-    table.append(el("tr", {}, ["Date", "Score", "Searches", "Map pack", "Grade", "Lens used"].map((label) => el("th", {}, [label]))));
+    table.append(el("tr", {}, ["Date", "Score", "Searches", "Map pack", "Grade", "Lens used", ""].map((label) => el("th", {}, [label]))));
     group.forEach((run) => {
       const zone = run.zone && run.zone.value ? run.zone.value : "Unavailable";
       const score = run.market_score && run.market_score.value != null ? String(run.market_score.value) : "Unavailable";
       const volume = run.volume && run.volume.value != null ? String(run.volume.value) : "Unavailable";
       const pack = run.map_pack ? (run.map_pack.value != null ? String(run.map_pack.value) : "Unavailable") : "Unavailable";
+      const open = el("button", { class: "btn ghost sm", type: "button" }, ["Open"]);
+      open.addEventListener("click", () => openSaved(run));
       table.append(el("tr", {}, [
         el("td", {}, [run.checked_at ? run.checked_at.replace("T", " ").slice(0, 16) : ""]),
         el("td", { class: "num" }, [score]),
         el("td", { class: "num" }, [volume]),
         el("td", {}, [pack]),
         el("td", {}, [el("span", { class: "zone-chip" }, [zone])]),
-        el("td", {}, [run.lens_label || "Not stored"])
+        el("td", {}, [run.lens_label || "Not stored"]),
+        el("td", {}, [open])
       ]));
     });
     head.append(table);
@@ -2196,8 +2209,30 @@ function renderHistory(runs) {
   slot.append(el("p", { class: "help" }, ["Open loads the saved check for $0. Nothing calls DataForSEO."]));
 }
 
+function openSaved(run) {
+  $("keyword").value = run.niche || "";
+  state.keyword = run.niche || "";
+  const city = $("city-any");
+  if (city) city.value = `${run.city}, ${run.state}`;
+  setLens(run.lens === "four_yes" ? "four_yes" : "classroom");
+  closeHistory();
+  loadRules(run.niche, run.city, run.state);
+  const score = run.market_score && Number.isFinite(run.market_score.value) ? run.market_score.value : null;
+  if (score != null) {
+    renderGauge({
+      status: "calculated",
+      composite_display: String(score),
+      demand: { index: run.demand && run.demand.value, contribution_display: null },
+      competition: { index: run.competition && run.competition.value, contribution_display: null },
+      margin: { index: run.margin && run.margin.value, contribution_display: null }
+    }, `${run.niche} in ${run.city}, ${run.state}`, "Opened a saved check. Nothing calls DataForSEO.");
+  }
+  $("live").textContent = "Opened the saved check. Nothing calls DataForSEO.";
+}
+
 async function openCompare(newer, older) {
-  if (newer.maps_depth !== older.maps_depth || newer.lens !== older.lens && false) return;
+  if (newer.maps_depth !== older.maps_depth) return;
+  if ((newer.check_version || "") !== (older.check_version || "")) return;
   const response = await fetch(`/api/runs/diff?id=${encodeURIComponent(newer.id)}&prior=${encodeURIComponent(older.id)}`);
   const payload = await response.json();
   if (!payload.diff) return;
