@@ -1667,15 +1667,33 @@ async function chooseLocation(card) {
     paintStepper();
     return;
   }
+  state.confirmed = null;
+  state.quote = null;
   try {
-    const resolved = await post("/api/resolve", { mode: "example", city: card.name, state: card.state, country: "United States" });
+    const resolved = await post("/api/resolve", {
+      mode: liveMode ? "live" : "example",
+      city: state.location.name,
+      state: state.location.state,
+      country: "United States"
+    });
+    if (!resolved.can_validate) {
+      state.quoteError = resolved.block_message || `No confirmed location for ${state.location.name}, ${state.location.state}. A paid check was not quoted.`;
+      showCityMessage(state.quoteError, true);
+      renderQuote(null, state.proposal);
+      $("paid-note").textContent = state.quoteError;
+      paintStepper();
+      return;
+    }
     const side = (match) => match ? { location_code: match.location_code, location_name: match.location_name, location_type: match.location_type } : null;
     state.confirmed = { google_ads: side(resolved.google_ads.match), google_maps: side(resolved.google_maps.match) };
+    showCityMessage("");
     state.quote = await post("/api/quote", quoteBody());
     if (state.quote.cache_hit && state.quote.cached_report) showStored(state.quote.cached_report);
   } catch (error) {
     state.quote = null;
+    state.confirmed = null;
     state.quoteError = error.message;
+    showCityMessage(error.message, true);
   }
   renderQuote(state.quote, state.proposal);
   if (!state.quote && state.quoteError) $("paid-note").textContent = state.quoteError;

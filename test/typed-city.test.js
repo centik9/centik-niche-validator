@@ -290,7 +290,7 @@ test("use this pair and a heat-only city select through the city field without a
     fetch: async (url, options = {}) => {
       const path = String(url);
       const body = options.body ? JSON.parse(options.body) : null;
-      calls.push(path);
+      calls.push({ path, body });
       if (/dataforseo|search_volume|maps\/live|google\/organic|trends/i.test(path)) {
         throw new Error(`paid call ${path}`);
       }
@@ -320,7 +320,21 @@ test("use this pair and a heat-only city select through the city field without a
         };
       }
       if (path.endsWith("/api/resolve")) {
-        return { ok: true, json: async () => ({ google_ads: { match: null }, google_maps: { match: null }, requests: [] }) };
+        const match = (code) => ({
+          location_code: code,
+          location_name: `${body.city},${body.state},United States`,
+          location_type: "City"
+        });
+        return {
+          ok: true,
+          json: async () => ({
+            can_validate: true,
+            outcome: "matched",
+            block_message: null,
+            google_ads: { match: match(5012345) },
+            google_maps: { match: match(6012345) }
+          })
+        };
       }
       if (path.endsWith("/api/quote")) {
         return {
@@ -380,7 +394,13 @@ test("use this pair and a heat-only city select through the city field without a
   assert.match(document.getElementById("verdict").textContent, /Insufficient data/);
   assert.equal(document.getElementById("pay-go").disabled, false);
   assert.equal(document.getElementById("pay-go").textContent, "Okay, run paid check");
-  assert.equal(calls.some((path) => path.endsWith("/api/validate")), false);
+  assert.equal(calls.some((call) => call.path.endsWith("/api/validate")), false);
+  const resolved = calls.filter((call) => call.path.endsWith("/api/resolve"));
+  assert.equal(resolved.at(-1).body.mode, "example");
+  assert.equal(resolved.at(-1).body.city, "Bella Vista");
+  const quoted = calls.filter((call) => call.path.endsWith("/api/quote"));
+  assert.equal(quoted.at(-1).body.confirmed.google_ads.location_code, 5012345);
+  assert.equal(quoted.at(-1).body.confirmed.google_maps.location_code, 6012345);
 
   input.value = "Bella Vista, TX";
   await context.confirmTypedCity();
@@ -404,5 +424,5 @@ test("use this pair and a heat-only city select through the city field without a
   assert.match(textOf(document.getElementById("stepper")), /Omaha, Nebraska/);
   assert.equal(document.getElementById("pay-go").disabled, false);
   assert.doesNotMatch(input.value, /Texas/);
-  assert.equal(calls.some((path) => /dataforseo|\/api\/validate/.test(path)), false);
+  assert.equal(calls.some((call) => /dataforseo|\/api\/validate/.test(call.path)), false);
 });
