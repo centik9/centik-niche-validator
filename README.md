@@ -94,7 +94,7 @@ A validation report has these separate pieces:
 - It does not replace the Maps competition score with regular Google results, and it does not turn Trends interest into search volume.
 - It does not treat `se_results_count` as a census. DataForSEO documents it as the SERP total, and published examples can show `0` while items are present. It is never used in the score.
 - It does not treat `is_claimed` as a verified buyer. It means the Google listing has a claimed owner.
-- It does not pick a city by a partial or wrong-state name. `Springfield` in Illinois is not Springfield in Missouri. `Portland` in Maine is not Portland in Oregon, and it is not South Portland.
+- It does not pick a city by a partial or wrong-state name. `Springfield` in Illinois is not Springfield in Missouri or Massachusetts. `Portland` in Maine is not Portland in Oregon, and it is not South Portland. `Omaha` in Texas is not Omaha in Nebraska. `Bella Vista` in Arkansas is not Bella Vista in California. `Lancaster` in Ohio is not Lancaster in Pennsylvania or California. A city that cannot be confirmed in the chosen state is an error. Another state's row is not used.
 - It does not send a Google Ads location code to the Maps endpoint, or the reverse. The two products have separate location lists.
 - Example mode does not measure the city you typed. The banner says so. Fixture niches such as `missing volume` are exact phrases for the built-in fixture only. Live mode sends the keyword as typed.
 
@@ -115,7 +115,7 @@ The process binds `0.0.0.0` and listens on `PORT`, or 3000 if `PORT` is unset. O
 
 The form asks for a niche keyword plus city, state, and country as separate fields. Resolve a location, confirm that the returned city is the one you meant, then run a validation.
 
-The primary actions use example mode. Live buttons stay disabled unless `/health` reports `live_mode: true`, and the server still rejects a live request unless it was started with the opt-in below. A withheld index is labeled **Withheld**. It is not displayed as 0. A calculated `0.0` is a real result of the formula (measured zero demand and a full 100-listing sample).
+The primary actions use example mode. Live buttons stay disabled unless `/health` reports `live_mode: true`, and the server still rejects a live request unless it was started with the opt-in below. Missing demand is labeled **Insufficient data**. It is not displayed as 0. A measured zero is labeled **0 (measured)**. If that measured zero would otherwise produce a favorable grade, the displayed grade is capped at **14.9**, a clear fail. A calculated `0.0` remains a real formula result when measured zero demand meets a full 100-listing sample.
 
 ## HTTP API
 
@@ -250,9 +250,9 @@ The combined index is withheld when:
 - the Maps organic sample is missing, unsupported, or failed
 - the Maps sample is a measured zero (openness would otherwise be 100)
 
-Measured zero demand is still a measurement. It can enter the index when the Maps sample is a non-zero measured count.
+Measured zero demand is still a measurement. The demand index stays 0 when the Maps sample is a non-zero measured count. If the weighted formula would land at 15.0 or higher, the displayed grade is capped at 14.9 so a zero-demand market cannot look workable, green, or favorable. The uncapped formula result is kept on `grade_cap`. Missing, failed, empty, and unusable demand stay withheld as insufficient data and are not capped into a zero.
 
-Measured zero demand with a non-empty measured sample still produces an index. The demand index is 0, so the result only reflects unfilled slots in a 100-listing sample. The default example niche `zero volume` is `30.8`. The niche `zero volume saturated` is a calculated `0.0`, which is different from a withheld index.
+The default example niche `zero volume` has an uncapped formula result of `30.8` and a displayed grade of `14.9`. The niche `zero volume saturated` is a calculated `0.0`, which is different from insufficient data.
 
 Completeness is how many of the two required inputs were measured. CPC is not required.
 
@@ -268,7 +268,7 @@ These niches are exact, case-insensitive matches in example mode only:
 | --- | --- |
 | any other phrase | 320 average monthly searches, CPC 8.5 USD, 12 listings, one address city outside the query, `se_results_count` 0 alongside items, index 79.6 |
 | `missing volume` | null volume and CPC; combined index withheld |
-| `zero volume` | measured zero volume and CPC; index 30.8 |
+| `zero volume` | measured zero volume and CPC; uncapped formula 30.8, displayed grade capped at 14.9 |
 | `zero volume saturated` | measured zero volume and 100 listings; calculated 0.0 |
 | `missing cpc` | volume present, CPC null; index still 79.6 |
 | `maps empty` | measured zero listings; index withheld |
@@ -277,7 +277,7 @@ These niches are exact, case-insensitive matches in example mode only:
 | `spellcheck test` | spell value `emergency plumber`; confidence 0.60 |
 | `uneven months` | monthly mean differs from `search_volume`; the index still uses `search_volume` |
 
-Example location coverage is a small gazetteer: several Springfields, both Portlands, South Portland, Austin, New York City versus New York State, both Kansas Cities, Vancouver in Washington and in British Columbia, Washington DC versus Washington State, and Saint Louis. It is not the DataForSEO directory.
+Example location coverage is a small gazetteer: several Springfields, both Portlands, South Portland, both Omahas, both Bella Vistas, three Lancasters, Austin, New York City versus New York State, both Kansas Cities, Vancouver in Washington and in British Columbia, Washington DC versus Washington State, and Saint Louis. It is not the DataForSEO directory.
 
 ## Safety limits
 

@@ -1,7 +1,7 @@
 export const STANDING_LIMITATIONS = [
   "Search volume is Google Ads' approximate average monthly searches via DataForSEO Keywords Data. It is not a count of customers.",
   "A null search volume means no data was returned. A null is not treated as zero demand, and it never produces a combined index.",
-  "A measured search volume of zero stays a measured zero and can enter the combined index only together with a non-empty measured Maps sample.",
+  "A measured search volume of zero stays a measured zero. It can be reported only together with a non-empty measured Maps sample, and the displayed grade is capped at a clear fail. It is not missing data.",
   "CPC is the average Google Ads cost per click in USD. CPC is not revenue, not customer value, and not advertiser spend. This app does not multiply CPC by search volume.",
   "Google Ads competition and competition_index are paid-search advertiser competition, not local business competition.",
   "Google Ads may return no data for some keywords, may combine similar keywords, and may spell-correct the keyword you sent.",
@@ -18,7 +18,7 @@ export const STANDING_LIMITATIONS = [
   "Organic listings are deduplicated by place_id, then cid, then normalized title and address. Paid items and directory items are excluded from the organic count. Listings whose address city differs are kept and counted, not silently dropped.",
   "is_claimed means someone has claimed the Google listing. Buyers are not verified.",
   "The combined index is a weighted heuristic with the bands and weights in this response. It is not a grade, not a recommendation, and not an economic valuation.",
-  "The combined index is withheld when demand is missing, unsupported, or failed, and when the Maps sample is missing or measured as zero listings. An empty Maps sample is not scored as an open market.",
+  "The combined index is withheld when demand is missing, unsupported, or failed, and when the Maps sample is missing or measured as zero listings. Missing demand is insufficient data, not a measured zero. An empty Maps sample is not scored as an open market. A measured zero demand grade cannot rise above a clear fail.",
   "Example mode returns fixture data from this repository. Example mode is not a measurement of the city you typed, and example location codes are not DataForSEO codes.",
   "Live Step 1 specialties come from United States keyword ideas. Phrases from other trades are removed. A thin in-trade result is reported as thin. The example trade list is not substituted for a live lookup."
 ];

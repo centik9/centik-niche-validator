@@ -60,10 +60,21 @@ function stampDepth(report) {
 }
 
 function metricText(metric) {
-  if (!metric || metric.value == null || metric.status === "missing") return "Missing";
+  if (!metric || metric.status === "missing" || metric.status === "unsupported" || metric.status === "unusable" || metric.status === "not_requested" || metric.value == null) {
+    return metric && metric.status === "failed" ? "Failed" : "Insufficient data";
+  }
   if (metric.status === "failed") return "Failed";
-  if (metric.status === "partial") return `${metric.value} partial`;
+  if (metric.status === "measured_zero") return "0 (measured)";
+  if (metric.status === "partial") return `${metric.value} (partial)`;
   return String(metric.value);
+}
+
+function moneyText(metric) {
+  if (!metric || metric.value == null || metric.status === "missing" || metric.status === "failed" || metric.status === "unusable" || metric.status === "unsupported") {
+    return "Insufficient data";
+  }
+  if (metric.status === "measured_zero") return "$0.00 (measured)";
+  return money(metric.value);
 }
 
 const ZONES = [
@@ -553,9 +564,10 @@ function renderMap() {
 
 function renderGauge(composite, title, note) {
   $("score-title").textContent = title;
+  const insufficient = Boolean(composite && composite.status === "insufficient_data");
   const score = composite && composite.status === "calculated" ? Number(composite.composite_display) : null;
   const zone = score == null ? null : zoneOf(score);
-  const display = score == null ? "-" : (composite.composite_display || String(Math.round(score)));
+  const display = insufficient ? "Insufficient data" : (score == null ? "-" : (composite.composite_display || String(Math.round(score))));
   const G = { cx: 180, cy: 168, R: 112 };
   const point = (value, radius) => {
     const angle = Math.PI * (1 - value / 100);
@@ -570,7 +582,9 @@ function renderGauge(composite, title, note) {
     viewBox: "0 0 360 210",
     class: "dial",
     role: "img",
-    "aria-label": score == null ? "No market score yet." : `Market score ${display} out of 100. Zone ${zone.name}.`
+    "aria-label": insufficient
+      ? "Insufficient data. Demand was not measured, so there is no market score. Missing data is not a score of 0."
+      : (score == null ? "No market score yet." : `Market score ${display} out of 100. Zone ${zone.name}.`)
   });
   const defs = svg("defs", {}, dial);
   const filter = svg("filter", { id: "zoneglow", x: "-30%", y: "-30%", width: "160%", height: "160%" }, defs);
@@ -590,7 +604,7 @@ function renderGauge(composite, title, note) {
   });
   const needle = svg("g", { id: "needle" }, dial);
   needle.setAttribute("transform", `rotate(-90 ${G.cx} ${G.cy})`);
-  svg("path", { d: `M${G.cx - 3} ${G.cy} L${G.cx} ${G.cy - 96} L${G.cx + 3} ${G.cy} Z`, fill: "#f8fafc" }, needle);
+  if (!insufficient) svg("path", { d: `M${G.cx - 3} ${G.cy} L${G.cx} ${G.cy - 96} L${G.cx + 3} ${G.cy} Z`, fill: "#f8fafc" }, needle);
   svg("circle", { cx: G.cx, cy: G.cy, r: 11, fill: "#041016", stroke: "#22d3ee", "stroke-width": 3 }, dial);
   svg("circle", { cx: G.cx, cy: G.cy, r: 4, fill: "#22d3ee" }, dial);
   $("dialwrap").replaceChildren(dial);
@@ -598,11 +612,16 @@ function renderGauge(composite, title, note) {
     item.classList.toggle("on", zone && item.dataset.zone === zone.name);
   });
   $("num").style.opacity = "1";
-  $("num").textContent = display;
-  $("chipwrap").replaceChildren(zone ? el("span", { class: "chip", style: `color:${zoneColor(zone)}` }, [zone.name]) : "");
-  $("verdict").textContent = zone ? zone.line : "The score appears after you pick a city.";
-  $("demand-note").textContent = note || "";
-  const factors = composite && composite.demand ? [
+  $("num").textContent = insufficient ? "-" : display;
+  $("chipwrap").replaceChildren(insufficient
+    ? el("span", { class: "chip" }, ["Insufficient data"])
+    : (zone ? el("span", { class: "chip", style: `color:${zoneColor(zone)}` }, [zone.name]) : ""));
+  const capNote = composite && composite.grade_cap && composite.grade_cap.applied ? composite.grade_cap.note : "";
+  $("verdict").textContent = insufficient
+    ? "Search demand was not returned. This is not a score of 0."
+    : (zone ? zone.line : "The score appears after you pick a city.");
+  $("demand-note").textContent = [note || "", capNote].filter(Boolean).join(" ");
+  const factors = composite && composite.demand && !insufficient ? [
     ["Demand", composite.demand.index, "40%", "--cyan", composite.demand.contribution_display],
     ["Competition", composite.competition.index, "30%", "--violet", composite.competition.contribution_display],
     ["Margin", composite.margin.index, "30%", "--pink", composite.margin.contribution_display]
@@ -1108,7 +1127,10 @@ function renderEstimates(proposal, report = state.storedReport) {
   const kpis = $("kpis");
   kpis.replaceChildren();
   const pill = $("est-pill");
-  const fromCheck = realCheck(report) && checkVolume(report) != null;
+  const volumeMetric = report && report.demand && report.demand.search_volume;
+  const measuredZeroVolume = Boolean(realCheck(report) && volumeMetric && volumeMetric.status === "measured_zero");
+  const missingDemand = Boolean(realCheck(report) && (!volumeMetric || volumeMetric.value == null || volumeMetric.status === "missing" || volumeMetric.status === "failed" || volumeMetric.status === "unusable"));
+  const fromCheck = realCheck(report) && checkVolume(report) != null && !measuredZeroVolume;
   const sampleSearches = proposal && proposal.composite && proposal.composite.demand && proposal.composite.demand.monthly_searches;
   const searches = fromCheck ? checkVolume(report) : (Number.isFinite(sampleSearches) ? sampleSearches : null);
   if (!proposal || !state.location) {
@@ -1129,9 +1151,13 @@ function renderEstimates(proposal, report = state.storedReport) {
   const avg = averageJob(proposal.price);
   const hasVolume = Number.isFinite(searches) && searches > 0;
   const looking = resolved.status === "looking_up";
-  const leadCaption = leads
-    ? (fromCheck ? "From last check search volume" : "From sample search volume")
-    : (looking && hasVolume ? "No studied rate yet" : "Needs search volume");
+  const leadCaption = measuredZeroVolume
+    ? "Measured zero searches"
+    : missingDemand
+      ? "Insufficient data"
+      : leads
+        ? (fromCheck ? "From last check search volume" : "From sample search volume")
+        : (looking && hasVolume ? "No studied rate yet" : "Needs search volume");
   const leadValue = !leads ? "-" : (leads.low === leads.high ? String(leads.low) : `${leads.low} to ${leads.high}`);
   kpis.append(estKpi("Leads a month", leadValue, leadCaption));
   if (leads && avg != null) {
@@ -1141,7 +1167,11 @@ function renderEstimates(proposal, report = state.storedReport) {
   } else {
     const revenueCaption = avg == null
       ? "Needs a published national job price"
-      : (looking && hasVolume ? "No studied rate yet" : "Needs search volume");
+      : measuredZeroVolume
+        ? "Measured zero searches"
+        : missingDemand
+          ? "Insufficient data"
+          : (looking && hasVolume ? "No studied rate yet" : "Needs search volume");
     kpis.append(estKpi("Revenue a month", "-", revenueCaption, "rev"));
   }
   kpis.append(estKpi("Average job", avg == null ? "-" : `$${avg.toLocaleString("en-US")}`, avg == null ? "Needs a published national job price" : "National range, not city adjusted"));
@@ -1278,14 +1308,18 @@ function renderResults(message, report) {
   let searches = "-";
   let rivals = "-";
   let bid = "-";
+  let searchesCaption = real ? "From last check." : "Sample, not live";
   if (report) {
     const volume = report.demand && report.demand.search_volume;
     const listings = report.city_market && report.city_market.unique_listings;
     const cpc = report.demand && report.demand.cpc;
-    if (volume && Number.isFinite(volume.value)) searches = volume.value.toLocaleString("en-US");
-    if (Number.isFinite(listings)) rivals = String(listings);
-    if (cpc && Number.isFinite(cpc.value)) bid = `$${cpc.value.toFixed(2)}`;
+    searches = real || volume ? metricText(volume) : "-";
+    if (Number.isFinite(listings)) rivals = listings === 0 ? "0 (measured)" : String(listings);
+    else if (real) rivals = "Insufficient data";
+    bid = real || cpc ? moneyText(cpc) : "-";
     $("res-pill").textContent = real ? "Live Google data" : "Sample data";
+    if (real && volume && volume.status === "measured_zero") searchesCaption = "Measured zero, not missing.";
+    else if (real && (!volume || volume.value == null || volume.status === "missing" || volume.status === "failed" || volume.status === "unusable")) searchesCaption = "Source returned nothing.";
   } else {
     const composite = state.location && state.proposal && state.proposal.composite;
     const sampleSearches = composite && composite.demand && composite.demand.monthly_searches;
@@ -1295,9 +1329,9 @@ function renderResults(message, report) {
     $("res-pill").textContent = "Sample data";
   }
   const caption = real ? "From last check." : "Sample, not live";
-  slot.append(resTile("Monthly searches", searches, caption, RES_SPARKS.searches, false));
+  slot.append(resTile("Monthly searches", searches, searchesCaption, RES_SPARKS.searches, false));
   slot.append(resTile("Map pack rivals", rivals, caption, RES_SPARKS.rivals, false));
-  slot.append(resTile("Top ad bid", bid, caption, RES_SPARKS.bid, true));
+  slot.append(resTile("Top ad bid", bid, bid === "Insufficient data" || bid === "$0.00 (measured)" ? searchesCaption : caption, RES_SPARKS.bid, true));
   if (message) slot.append(el("p", { class: message.toLowerCase().includes("not") ? "error res-note" : "help res-note" }, [message]));
   renderDetails(report);
 }
@@ -1311,7 +1345,13 @@ function renderDetails(report) {
   if (!has) return;
   $("details-pill").textContent = realCheck(report) ? "From last check" : "Sample data";
   const notes = [report.live_banner, report.example_banner].filter(Boolean);
-  if (report.live_composite) notes.push(`Live composite ${report.live_composite.composite_display}. Competition uses the Maps sample. Organic directory share does not change it.`);
+  if (report.live_composite && report.live_composite.status === "insufficient_data") {
+    notes.push("Insufficient data. Search demand was not returned, so there is no grade. That is not a measured zero.");
+  } else if (report.live_composite && report.live_composite.grade_cap && report.live_composite.grade_cap.applied) {
+    notes.push(`Grade capped at ${report.live_composite.composite_display} because demand was measured as zero. Uncapped formula ${report.live_composite.grade_cap.uncapped_display}. Competition uses the Maps sample.`);
+  } else if (report.live_composite && report.live_composite.status === "calculated") {
+    notes.push(`Live composite ${report.live_composite.composite_display}. Competition uses the Maps sample. Organic directory share does not change it.`);
+  }
   if (notes.length) slot.append(el("div", { class: "res-wide full details-notes" }, notes.map((text) => el("p", { class: "help" }, [text]))));
   const phrases = renderPhrasePanel(report);
   phrases.classList.add("full");
@@ -1330,7 +1370,7 @@ function renderPhrasePanel(report) {
   ]);
   const rows = demand.keyword_rows || [];
   if (!rows.length) {
-    panel.append(el("p", { class: "help" }, ["No phrase rows were returned."]));
+    panel.append(el("p", { class: "help" }, ["No phrase rows were returned. That is not a measured zero, and it is not a grade."]));
     return panel;
   }
   const table = el("table", { class: "phrase-table" });
@@ -1340,10 +1380,10 @@ function renderPhrasePanel(report) {
     body.append(el("tr", {}, [
       el("td", {}, [row.keyword || "-"]),
       el("td", {}, [metricText(row.search_volume)]),
-      el("td", {}, [row.cpc && row.cpc.value != null ? money(row.cpc.value) : metricText(row.cpc)]),
-      el("td", {}, [row.paid_search_competition && row.paid_search_competition.value != null ? String(row.paid_search_competition.value) : metricText(row.paid_search_competition)]),
-      el("td", {}, [row.low_top_of_page_bid && row.low_top_of_page_bid.value != null ? money(row.low_top_of_page_bid.value) : metricText(row.low_top_of_page_bid)]),
-      el("td", {}, [row.high_top_of_page_bid && row.high_top_of_page_bid.value != null ? money(row.high_top_of_page_bid.value) : metricText(row.high_top_of_page_bid)])
+      el("td", {}, [moneyText(row.cpc)]),
+      el("td", {}, [row.paid_search_competition && row.paid_search_competition.value != null && row.paid_search_competition.status !== "measured_zero" ? String(row.paid_search_competition.value) : metricText(row.paid_search_competition)]),
+      el("td", {}, [moneyText(row.low_top_of_page_bid)]),
+      el("td", {}, [moneyText(row.high_top_of_page_bid)])
     ]));
   });
   table.append(body);
@@ -1490,12 +1530,20 @@ function showStored(report) {
     : "Saved result";
   renderResults("", report);
   renderEstimates(state.proposal, report);
+  const gaugeNote = "Demand uses clustered coverage volume. Competition is the Maps sample. Organic directory share and Trends seasonality do not change those scores.";
   if (report.live_composite) {
-    renderGauge(
-      report.live_composite,
-      title,
-      "Demand uses clustered coverage volume. Competition is the Maps sample. Organic directory share and Trends seasonality do not change those scores."
-    );
+    renderGauge(report.live_composite, title, gaugeNote);
+  } else if (report.score && report.score.grade_state === "insufficient_data") {
+    renderGauge({ status: "insufficient_data", withheld_reason: report.score.withheld_reason }, title, gaugeNote);
+  } else if (report.score && report.score.grade_state === "capped_fail") {
+    renderGauge({
+      status: "calculated",
+      composite_display: report.score.overall_display,
+      grade_cap: report.score.grade_cap,
+      demand: { index: 0, contribution_display: "0.0" },
+      competition: { index: report.city_market && report.city_market.competition_index, contribution_display: null },
+      margin: { index: null, contribution_display: null }
+    }, title, gaugeNote);
   }
   markCached(true, { score: Boolean(report.live_composite) });
   paintStamp();
@@ -2182,7 +2230,7 @@ function renderHistory(runs) {
     group.forEach((run) => {
       const zone = run.zone && run.zone.value ? run.zone.value : "Unavailable";
       const score = run.market_score && run.market_score.value != null ? String(run.market_score.value) : "Unavailable";
-      const volume = run.volume && run.volume.value != null ? String(run.volume.value) : "Unavailable";
+      const volume = run.volume && run.volume.value === 0 ? "0 (measured)" : (run.volume && run.volume.value != null ? String(run.volume.value) : "Insufficient data");
       const pack = run.map_pack ? (run.map_pack.value != null ? String(run.map_pack.value) : "Unavailable") : "Unavailable";
       const open = el("button", { class: "btn ghost sm", type: "button" }, ["Open"]);
       open.addEventListener("click", () => openSaved(run));
@@ -2218,6 +2266,7 @@ function openSaved(run) {
   closeHistory();
   loadRules(run.niche, run.city, run.state);
   const score = run.market_score && Number.isFinite(run.market_score.value) ? run.market_score.value : null;
+  const title = `${run.niche} in ${run.city}, ${run.state}`;
   if (score != null) {
     renderGauge({
       status: "calculated",
@@ -2225,7 +2274,12 @@ function openSaved(run) {
       demand: { index: run.demand && run.demand.value, contribution_display: null },
       competition: { index: run.competition && run.competition.value, contribution_display: null },
       margin: { index: run.margin && run.margin.value, contribution_display: null }
-    }, `${run.niche} in ${run.city}, ${run.state}`, "Opened a saved check. Nothing calls DataForSEO.");
+    }, title, "Opened a saved check. Nothing calls DataForSEO.");
+  } else {
+    renderGauge({
+      status: "insufficient_data",
+      withheld_reason: "Insufficient data. This saved check has no measured grade."
+    }, title, "Opened a saved check. Nothing calls DataForSEO.");
   }
   $("live").textContent = "Opened the saved check. Nothing calls DataForSEO.";
 }

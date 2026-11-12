@@ -396,6 +396,80 @@ async function loadTrends(prepared, deps) {
   }
 }
 
+function liveCompositeFor({ origin, cityMarket, marginIndex, marginEstimated, score }) {
+  if (origin !== "live") return null;
+  if (marginIndex !== null && cityMarket.demand_index !== null && cityMarket.competition_index !== null) {
+    return scoreFromIndexes({
+      demandIndex: cityMarket.demand_index,
+      competitionIndex: cityMarket.competition_index,
+      marginIndex,
+      estimated: marginEstimated === true
+    });
+  }
+  if (cityMarket.demand_index === 0) {
+    const display = score.overall_display || "14.9";
+    return {
+      status: "calculated",
+      grade_state: "capped_fail",
+      model_id: "centik-composite-v1",
+      composite_tenths: score.overall_tenths,
+      composite_display: display,
+      band: "red",
+      score_band: "red",
+      clears_green: false,
+      clears_green_label: "no",
+      withheld_reason: null,
+      grade_cap: score.grade_cap || {
+        applied: true,
+        reason: "measured_zero_demand",
+        uncapped_display: null,
+        note: "Measured zero demand cannot produce a favorable grade. The displayed grade stays a clear fail."
+      },
+      demand: { index: 0, contribution_display: "0.0", label: "Measured zero", monthly_searches: 0 },
+      competition: {
+        index: cityMarket.competition_index,
+        contribution_display: null,
+        label: "Live Google data"
+      },
+      margin: { index: null, contribution_display: null, label: "Insufficient data" }
+    };
+  }
+  if (cityMarket.demand_index !== null) return null;
+  return {
+    status: "insufficient_data",
+    grade_state: "insufficient_data",
+    model_id: "centik-composite-v1",
+    composite_tenths: null,
+    composite_display: null,
+    band: "missing",
+    score_band: "missing",
+    clears_green: null,
+    clears_green_label: "insufficient data",
+    withheld_reason: score.withheld_reason || "Insufficient data. Demand was not measured, so there is no grade.",
+    grade_cap: {
+      applied: false,
+      reason: "demand_not_measured",
+      note: "A source that returned nothing, an empty keyword list, a failed call, or an unusable partial is not a measured zero and is not a grade."
+    },
+    demand: {
+      index: null,
+      contribution_display: null,
+      label: "Insufficient data",
+      monthly_searches: null
+    },
+    competition: {
+      index: null,
+      contribution_display: null,
+      label: "Insufficient data"
+    },
+    margin: {
+      index: null,
+      contribution_display: null,
+      label: "Insufficient data"
+    }
+  };
+}
+
 export async function resolveLocation(input, deps) {
   const prepared = input && input.cityNorm ? input : parseResolveInput(input);
   return resolvePrepared(prepared, deps);
@@ -414,14 +488,13 @@ export async function validateNiche(input, deps) {
   const score = buildScore({ demand: demand.report, maps: maps.report, origin: deps.origin });
   const cityMarket = cityMarketFromReports(demand.report, maps.report, deps.origin);
   const marginIndex = Number.isInteger(prepared.margin_index) ? prepared.margin_index : null;
-  const liveComposite = deps.origin === "live" && marginIndex !== null && cityMarket.demand_index !== null && cityMarket.competition_index !== null
-    ? scoreFromIndexes({
-      demandIndex: cityMarket.demand_index,
-      competitionIndex: cityMarket.competition_index,
-      marginIndex,
-      estimated: prepared.margin_estimated === true
-    })
-    : null;
+  const liveComposite = liveCompositeFor({
+    origin: deps.origin,
+    cityMarket,
+    marginIndex,
+    marginEstimated: prepared.margin_estimated === true,
+    score
+  });
   return {
     data_origin: deps.origin,
     example_data: deps.origin === "example",

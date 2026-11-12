@@ -44,11 +44,11 @@ function matchMetro(rows, query) {
     const parts = splitLocationName(row.location_name);
     if (normalizePlace(parts.place) !== query.cityNorm) continue;
     const regionNorms = parts.regions.map((region) => normalizeState(region, query.countryIso));
-    if (regionNorms.length && !regionNorms.includes(query.stateNorm)) continue;
+    if (!regionNorms.includes(query.stateNorm)) continue;
     hits.push(row);
   }
-  const chosen = pickLowest(hits);
-  return chosen ? present(chosen) : null;
+  if (hits.length !== 1) return null;
+  return present(hits[0]);
 }
 
 function matchAdmin(rows, query) {

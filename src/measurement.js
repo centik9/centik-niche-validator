@@ -21,3 +21,13 @@ export function isMeasuredStatus(status) {
 export function field(status, value, extra = {}) {
   return { status, value, ...extra };
 }
+
+export function labelDemand(metric) {
+  if (!metric || metric.status === "missing" || metric.status === "unsupported" || metric.status === "unusable" || metric.status === "not_requested" || metric.value == null) {
+    return metric && metric.status === "failed" ? "Failed" : "Insufficient data";
+  }
+  if (metric.status === "failed") return "Failed";
+  if (metric.status === "measured_zero") return "0 (measured)";
+  if (metric.status === "partial") return `${metric.value} (partial)`;
+  return String(metric.value);
+}

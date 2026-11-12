@@ -228,8 +228,18 @@ function renderResolution() {
   }
 }
 
+function shownValue(field) {
+  if (!field || field.status === "missing" || field.status === "unsupported" || field.status === "unusable" || field.status === "not_requested" || field.value == null) {
+    return field && field.status === "failed" ? "Failed" : "Insufficient data";
+  }
+  if (field.status === "failed") return "Failed";
+  if (field.status === "measured_zero") return "0 (measured)";
+  if (field.status === "partial") return `${field.value} (partial)`;
+  return String(field.value);
+}
+
 function metric(label, field) {
-  const value = field && field.value !== null && field.value !== undefined ? String(field.value) : "—";
+  const value = shownValue(field);
   const unit = field && field.unit ? ` ${field.unit}` : "";
   const row = el("div", {}, [
     el("h3", {}, [label]),
@@ -266,12 +276,15 @@ function renderReport() {
 
   const score = report.score;
   const scoreBlock = el("div", {}, [el("h3", {}, ["Combined heuristic index"])]);
-  if (!score || score.overall_status !== "calculated" || score.overall_display === null) {
+  if (score && score.grade_state === "insufficient_data") {
+    scoreBlock.append(el("p", { class: "score-withheld" }, ["Insufficient data"]));
+    scoreBlock.append(el("p", {}, [score.withheld_reason || "Demand was not measured. This is not a score of 0."]));
+  } else if (!score || score.overall_status !== "calculated" || score.overall_display === null) {
     scoreBlock.append(el("p", { class: "score-withheld" }, ["Withheld"]));
     scoreBlock.append(el("p", {}, [score && score.withheld_reason ? score.withheld_reason : "No combined index."]));
   } else {
     scoreBlock.append(el("p", { class: "score-number" }, [score.overall_display]));
-    scoreBlock.append(el("p", {}, ["Calculated heuristic index. Not a recommendation."]));
+    scoreBlock.append(el("p", {}, [score.grade_cap && score.grade_cap.applied ? score.grade_cap.note : "Calculated heuristic index. Not a recommendation."]));
   }
   if (score) {
     (score.flags || []).forEach((flag) => scoreBlock.append(el("span", { class: "flag" }, [flag])));
@@ -319,9 +332,9 @@ function renderReport() {
     ]);
     const phraseBody = el("tbody");
     report.demand.keyword_rows.forEach((row) => {
-      const volumeText = row.search_volume && row.search_volume.value != null ? String(row.search_volume.value) : "Missing";
-      const cpcText = row.cpc && row.cpc.value != null ? String(row.cpc.value) : "Missing";
-      const competitionText = row.paid_search_competition && row.paid_search_competition.value != null ? String(row.paid_search_competition.value) : "Missing";
+      const volumeText = shownValue(row.search_volume);
+      const cpcText = shownValue(row.cpc);
+      const competitionText = shownValue(row.paid_search_competition);
       phraseBody.append(el("tr", {}, [
         el("td", {}, [row.keyword || "—"]),
         el("td", {}, [volumeText]),
