@@ -79,10 +79,12 @@
         <li><i class="h1"></i>Coldest</li>
       </ul>
       <p class="help map-cap" id="map-cap">Stylized heat map. Heat is sample demand, not a live street map. Austin and Cedar Park stay on this map.</p>
-      <label class="field"><span>City and state</span>
-        <input id="city-any" type="text" maxlength="80" autocomplete="off" placeholder="Any US city, state">
+      <label class="field city-field"><span>City and state</span>
+        <input id="city-any" type="text" maxlength="80" autocomplete="off" placeholder="Any US city, state" aria-describedby="city-any-msg">
+        <ul id="city-suggest" class="city-suggest" hidden></ul>
       </label>
-      <p class="help">Any US city can go here. Use this pair fills this field. The map above stays the sample heat map.</p>
+      <p class="help" id="city-any-msg" role="status"></p>
+      <p class="help">Type City, ST and press Enter. A city outside the sample map can be selected. A paid check still waits for Okay.</p>
       <p class="data-stamp" id="map-stamp" hidden></p>
       <ul class="locs" id="locs"></ul>
     </section>

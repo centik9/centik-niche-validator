@@ -384,6 +384,12 @@ body.card-focus .shell { filter: blur(12px); }
 .h4 { background: var(--heat-4); } .h3 { background: var(--heat-3); } .h2 { background: var(--heat-2); } .h1 { background: var(--heat-1); }
 .z-no { background: var(--z-no); } .z-low { background: var(--z-low); } .z-med { background: var(--z-med); } .z-high { background: var(--z-high); } .z-max { background: var(--z-max); }
 .map-cap { font-size: 0.78rem; color: var(--muted-strong); }
+.city-field { position: relative; }
+.city-suggest { list-style: none; margin: 6px 0 0; padding: 0; border: 1px solid rgba(255,255,255,.14); border-radius: 12px; overflow: hidden; background: #0a0e15; }
+.city-suggest button { width: 100%; text-align: left; background: transparent; color: inherit; border: 0; border-bottom: 1px solid rgba(255,255,255,.08); padding: 8px 12px; font: inherit; cursor: pointer; }
+.city-suggest li:last-child button { border-bottom: 0; }
+.city-suggest button:hover, .city-suggest button:focus-visible { background: rgba(34, 211, 238, .08); }
+#city-any-msg:empty { display: none; }
 .area-map.flash { animation: map-flash 900ms ease; }
 @keyframes map-flash { 0% { border-color: rgba(34, 211, 238, .8); } 100% { border-color: var(--line); } }
 @media (prefers-reduced-motion: reduce) { .area-map.flash { animation: none; } }
