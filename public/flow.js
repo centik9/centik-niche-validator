@@ -588,8 +588,14 @@ async function runExampleCheck() {
     });
     result.replaceChildren();
     if (report.city_market) result.append(el("p", {}, [`Demand: ${report.city_market.demand_label}. Competition: ${report.city_market.competition_label}.`]));
-    if (report.live_composite) {
+    if (report.live_composite && report.live_composite.status === "insufficient_data") {
+      result.append(el("p", { class: "score-withheld" }, ["Insufficient data"]));
+      result.append(el("p", {}, [report.live_composite.withheld_reason || "Demand was not measured. This is not a score of 0."]));
+    } else if (report.live_composite) {
       result.append(el("p", { class: "score-number" }, [report.live_composite.composite_display]));
+      if (report.live_composite.grade_cap && report.live_composite.grade_cap.applied) {
+        result.append(el("p", {}, [report.live_composite.grade_cap.note]));
+      }
       const slot = $("proposal-slot");
       const current = slot.querySelector("figure.gauge");
       if (current) {
@@ -602,7 +608,10 @@ async function runExampleCheck() {
     }
     if (report.example_banner) result.append(el("p", { class: "banner" }, [report.example_banner]));
     const score = report.score;
-    if (!score || score.overall_status !== "calculated" || score.overall_display === null) {
+    if (score && score.grade_state === "insufficient_data") {
+      result.append(el("p", { class: "score-withheld" }, ["Insufficient data"]));
+      result.append(el("p", {}, [score.withheld_reason || "Demand was not measured. This is not a score of 0."]));
+    } else if (!score || score.overall_status !== "calculated" || score.overall_display === null) {
       result.append(el("p", { class: "score-withheld" }, ["Withheld"]));
       result.append(el("p", {}, [score && score.withheld_reason ? score.withheld_reason : "No combined index."]));
     } else {

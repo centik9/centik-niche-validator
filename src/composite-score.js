@@ -1,3 +1,5 @@
+import { CLEAR_FAIL_TENTHS, FAVORABLE_TENTHS } from "./scoring.js";
+
 export const COMPOSITE_MODEL_ID = "centik-composite-v1";
 export const DEMAND_WEIGHT = 40;
 export const COMPETITION_WEIGHT = 30;
@@ -138,10 +140,24 @@ export function scoreFromIndexes({ demandIndex, competitionIndex, marginIndex, e
     exampleCompetitorCount: 0,
     price
   });
-  const tenths = demandIndex * 4 + competitionIndex * 3 + marginIndex * 3;
+  const uncappedTenths = demandIndex * 4 + competitionIndex * 3 + marginIndex * 3;
+  const zeroDemand = demandIndex === 0;
+  const gradeCapApplied = zeroDemand && uncappedTenths >= FAVORABLE_TENTHS;
+  const tenths = gradeCapApplied ? CLEAR_FAIL_TENTHS : uncappedTenths;
   const value = tenths / 10;
   const scoreBand = bandForComposite(value);
-  const band = estimated && scoreBand === "green" ? "yellow" : scoreBand;
+  const band = !gradeCapApplied && estimated && scoreBand === "green" ? "yellow" : scoreBand;
+  const gradeCap = {
+    applied: gradeCapApplied,
+    reason: zeroDemand ? "measured_zero_demand" : null,
+    cap_tenths: CLEAR_FAIL_TENTHS,
+    cap_display: formatTenths(CLEAR_FAIL_TENTHS),
+    uncapped_tenths: uncappedTenths,
+    uncapped_display: formatTenths(uncappedTenths),
+    note: gradeCapApplied
+      ? `Measured zero demand cannot produce a favorable grade. The formula result ${formatTenths(uncappedTenths)} is capped at ${formatTenths(CLEAR_FAIL_TENTHS)}, a clear fail. Competition still uses the Maps listing count, the share with no website, and review pressure. This is a measured zero, not missing data.`
+      : (zeroDemand ? "Measured zero demand. The formula result was already a clear fail, so the grade was not raised." : null)
+  };
   return {
     ...scored,
     composite_tenths: tenths,
@@ -149,9 +165,11 @@ export function scoreFromIndexes({ demandIndex, competitionIndex, marginIndex, e
     score_band: scoreBand,
     band,
     estimated,
-    estimate_capped: estimated && scoreBand === "green",
+    estimate_capped: !gradeCapApplied && estimated && scoreBand === "green",
+    grade_state: gradeCapApplied ? "capped_fail" : "calculated",
+    grade_cap: gradeCap,
     clears_green: value >= GREEN_MIN,
-    clears_green_label: estimated && value >= GREEN_MIN ? "on an estimated price" : (value >= GREEN_MIN ? "yes" : "no"),
+    clears_green_label: estimated && value >= GREEN_MIN && !gradeCapApplied ? "on an estimated price" : (value >= GREEN_MIN ? "yes" : "no"),
     data_label: "Live Google data",
     demand: {
       ...scored.demand,

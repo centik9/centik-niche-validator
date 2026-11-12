@@ -80,14 +80,18 @@ test("missing demand does not become a zero score", async () => {
   assert.equal(report.maps.deduplication.unique_organic_listings.status, "measured");
 });
 
-test("measured zero demand is scored and measured zero CPC stays zero", async () => {
+test("measured zero demand is capped below a favorable grade and measured zero CPC stays zero", async () => {
   const report = await validateExample("zero volume");
   assert.equal(report.demand.search_volume.status, "measured_zero");
   assert.equal(report.demand.search_volume.value, 0);
   assert.equal(report.demand.cpc.status, "measured_zero");
   assert.equal(report.score.overall_status, "calculated");
-  assert.equal(report.score.overall_display, "30.8");
+  assert.equal(report.score.grade_state, "capped_fail");
+  assert.equal(report.score.grade_cap.applied, true);
+  assert.equal(report.score.grade_cap.uncapped_display, "30.8");
+  assert.equal(report.score.overall_display, "14.9");
   assert.equal(report.score.inputs.demand_index, 0);
+  assert.ok(report.score.overall < 15);
 });
 
 test("an empty Maps sample does not raise the index", async () => {

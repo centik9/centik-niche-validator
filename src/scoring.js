@@ -5,6 +5,8 @@ export const DEMAND_WEIGHT_PERCENT = 65;
 export const OPENNESS_WEIGHT_PERCENT = 35;
 export const CONFIDENCE_CAP_HUNDREDTHS = 75;
 export const CONFIDENCE_FLOOR_HUNDREDTHS = 20;
+export const CLEAR_FAIL_TENTHS = 149;
+export const FAVORABLE_TENTHS = 150;
 
 export const DEMAND_BANDS = [
   { min: 0, max: 0, index: 0, label: "Measured zero" },
@@ -18,7 +20,7 @@ export const DEMAND_BANDS = [
 export const FORMULA = {
   demand_index: "Select the inclusive band containing clustered coverage volume, the sum of each cluster's maximum measured monthly searches. Word-order and stopword twins count once. The core term volume is reported separately and is not this input. Missing clusters are omitted, not added as zero. The highest band index is 90, not 100.",
   sample_openness: "100 - (100 * min(unique_organic_listings, requested_depth) / requested_depth). requested_depth is 100.",
-  overall: "round_half_up((65 * demand_index + 35 * sample_openness) / 10) / 10. Calculated only when both inputs are measured numbers and unique organic listings is greater than zero.",
+  overall: "round_half_up((65 * demand_index + 35 * sample_openness) / 10) / 10. Calculated only when both inputs are measured numbers and unique organic listings is greater than zero. When the demand input is a measured zero and that result is 15.0 or higher, the displayed grade is capped at 14.9 so it stays a clear fail. Missing, failed, empty, and unusable demand stay withheld as insufficient data and are not shown as zero.",
   rounding: "The tenth is rounded half away from zero with integer arithmetic, so binary floating point does not decide it.",
   confidence: "Start at 35 hundredths. Add 15 when at least 6 monthly values on the core term are numeric, plus 5 more when at least 12 are numeric, plus 10 when both products resolved to City or Municipality. Subtract 10 when the Maps sample fills the depth cap, and 5 when Google Ads spell-corrects the keyword. Clamp between 20 and 75 hundredths. Withheld when the combined index is withheld. Regular Google directory share and Trends seasonality are not inputs."
 };
@@ -134,9 +136,10 @@ export function buildScore({ demand, maps, origin }) {
     openness = sampleOpenness(unique.value, depth);
   }
 
+  const measuredZeroDemand = Boolean(volume && volume.status === "measured_zero");
   const flags = [];
   if (origin === "example") flags.push("example_data");
-  if (volume.status === "measured_zero") flags.push("measured_zero_demand");
+  if (measuredZeroDemand) flags.push("measured_zero_demand");
   if (volume.status === "partial") flags.push("clustered_volume_partial");
   if (uniqueMeasured && unique.value === 0) flags.push("maps_sample_empty");
   if (uniqueMeasured && unique.value > 0 && unique.value < depth / 2) flags.push("maps_sample_sparse");
@@ -161,6 +164,41 @@ export function buildScore({ demand, maps, origin }) {
     overallStatus = "calculated";
     overall = overallFromParts(demandIndex, openness);
   }
+
+  let gradeCap = {
+    applied: false,
+    reason: measuredZeroDemand ? "measured_zero_demand" : null,
+    cap_tenths: CLEAR_FAIL_TENTHS,
+    cap_display: formatTenths(CLEAR_FAIL_TENTHS),
+    uncapped_tenths: overall ? overall.tenths : null,
+    uncapped_display: overall ? overall.display : null,
+    note: measuredZeroDemand
+      ? (overall
+        ? "Measured zero demand. The formula result was already a clear fail, so the grade was not raised."
+        : "Measured zero demand is not missing data. No favorable grade was produced.")
+      : null
+  };
+  if (overall && measuredZeroDemand && overall.tenths >= FAVORABLE_TENTHS) {
+    gradeCap = {
+      applied: true,
+      reason: "measured_zero_demand",
+      cap_tenths: CLEAR_FAIL_TENTHS,
+      cap_display: formatTenths(CLEAR_FAIL_TENTHS),
+      uncapped_tenths: overall.tenths,
+      uncapped_display: overall.display,
+      note: `Measured zero demand cannot produce a favorable grade. The formula result ${overall.display} is capped at ${formatTenths(CLEAR_FAIL_TENTHS)}, a clear fail. This is a measured zero, not missing data. Competition and Maps depth are unchanged.`
+    };
+    overall = {
+      tenths: CLEAR_FAIL_TENTHS,
+      value: CLEAR_FAIL_TENTHS / 10,
+      display: formatTenths(CLEAR_FAIL_TENTHS)
+    };
+    flags.push("zero_demand_grade_capped");
+  }
+
+  const gradeState = overallStatus !== "calculated"
+    ? (volumeMeasured ? "withheld" : "insufficient_data")
+    : (gradeCap.applied ? "capped_fail" : "calculated");
 
   if (overallStatus === "withheld") flags.push("combined_index_withheld");
 
@@ -203,14 +241,18 @@ export function buildScore({ demand, maps, origin }) {
     interpretation.push("No combined index was produced.");
     interpretation.push(withheldReason);
   } else {
-    interpretation.push(`The combined index is ${overall.display}. It is not a recommendation to enter a market.`);
+    interpretation.push(gradeCap.applied
+      ? `The displayed grade is ${overall.display} because measured zero demand is capped at a clear fail. The uncapped formula result was ${gradeCap.uncapped_display}. It is not a recommendation to enter a market.`
+      : `The combined index is ${overall.display}. It is not a recommendation to enter a market.`);
     interpretation.push(`Demand band "${matchedBand.label}" from ${source.name} ${volume.value} contributes weight 0.65 as demand index ${demandIndex}.`);
     if (source.name === "clustered_coverage_volume") {
       interpretation.push("The demand index uses clustered coverage volume. The core term volume is separate. Word-order twins are not summed twice, and a missing phrase is not zero.");
     }
     interpretation.push(`The Maps sample has ${unique.value} unique organic listings out of ${depth} requested, so sample openness is ${openness} at weight 0.35.`);
     if (volume.status === "measured_zero") {
-      interpretation.push("Average monthly searches were measured as 0. That is a measured zero, not missing data. The demand index is 0.");
+      interpretation.push(gradeCap.applied
+        ? "Average monthly searches were measured as 0. That is a measured zero, not missing data. The demand index stays 0, and the grade cannot enter a favorable band."
+        : "Average monthly searches were measured as 0. That is a measured zero, not missing data. The demand index is 0, and the formula result was already a clear fail.");
     }
     if (flags.includes("maps_sample_sparse")) {
       interpretation.push(`The organic sample is under half of the ${depth} listings requested. A sparse sample can be a thin result, a query Maps did not treat as a local business search, or simply the first page of a larger set. It is not proof of an open market.`);
@@ -244,10 +286,14 @@ export function buildScore({ demand, maps, origin }) {
       sample_openness: openness
     },
     overall_status: overallStatus,
+    grade_state: gradeState,
+    grade_cap: gradeCap,
     overall: overall ? overall.value : null,
     overall_tenths: overall ? overall.tenths : null,
     overall_display: overall ? overall.display : null,
-    withheld_reason: withheldReason,
+    withheld_reason: gradeState === "insufficient_data"
+      ? "Insufficient data. Demand was not measured, so there is no grade. A source that returned nothing is not a measured zero and is not scored as zero."
+      : withheldReason,
     completeness: {
       required,
       measured_count: measuredCount,

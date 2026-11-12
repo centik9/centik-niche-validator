@@ -11,6 +11,11 @@ const ADS_ROWS = [
   { location_code: 9000018, location_name: "Kansas,United States", location_code_parent: 9000001, country_iso_code: "US", location_type: "State" },
   { location_code: 9000019, location_name: "Washington,United States", location_code_parent: 9000001, country_iso_code: "US", location_type: "State" },
   { location_code: 9000020, location_name: "District of Columbia,United States", location_code_parent: 9000001, country_iso_code: "US", location_type: "Territory" },
+  { location_code: 9000021, location_name: "Nebraska,United States", location_code_parent: 9000001, country_iso_code: "US", location_type: "State" },
+  { location_code: 9000022, location_name: "Arkansas,United States", location_code_parent: 9000001, country_iso_code: "US", location_type: "State" },
+  { location_code: 9000023, location_name: "California,United States", location_code_parent: 9000001, country_iso_code: "US", location_type: "State" },
+  { location_code: 9000024, location_name: "Ohio,United States", location_code_parent: 9000001, country_iso_code: "US", location_type: "State" },
+  { location_code: 9000025, location_name: "Pennsylvania,United States", location_code_parent: 9000001, country_iso_code: "US", location_type: "State" },
   { location_code: 9000030, location_name: "British Columbia,Canada", location_code_parent: 9000002, country_iso_code: "CA", location_type: "Province" },
   { location_code: 9001001, location_name: "Springfield,Illinois,United States", location_code_parent: 9000011, country_iso_code: "US", location_type: "City" },
   { location_code: 9001002, location_name: "Springfield,Missouri,United States", location_code_parent: 9000012, country_iso_code: "US", location_type: "City" },
@@ -25,7 +30,14 @@ const ADS_ROWS = [
   { location_code: 9001011, location_name: "Vancouver,Washington,United States", location_code_parent: 9000019, country_iso_code: "US", location_type: "City" },
   { location_code: 9001012, location_name: "Washington,District of Columbia,United States", location_code_parent: 9000020, country_iso_code: "US", location_type: "City" },
   { location_code: 9001013, location_name: "Saint Louis,Missouri,United States", location_code_parent: 9000012, country_iso_code: "US", location_type: "City" },
-  { location_code: 9001014, location_name: "Vancouver,British Columbia,Canada", location_code_parent: 9000030, country_iso_code: "CA", location_type: "City" }
+  { location_code: 9001014, location_name: "Vancouver,British Columbia,Canada", location_code_parent: 9000030, country_iso_code: "CA", location_type: "City" },
+  { location_code: 9001015, location_name: "Omaha,Nebraska,United States", location_code_parent: 9000021, country_iso_code: "US", location_type: "City" },
+  { location_code: 9001016, location_name: "Omaha,Texas,United States", location_code_parent: 9000016, country_iso_code: "US", location_type: "City" },
+  { location_code: 9001017, location_name: "Bella Vista,Arkansas,United States", location_code_parent: 9000022, country_iso_code: "US", location_type: "City" },
+  { location_code: 9001018, location_name: "Bella Vista,California,United States", location_code_parent: 9000023, country_iso_code: "US", location_type: "City" },
+  { location_code: 9001019, location_name: "Lancaster,Ohio,United States", location_code_parent: 9000024, country_iso_code: "US", location_type: "City" },
+  { location_code: 9001020, location_name: "Lancaster,Pennsylvania,United States", location_code_parent: 9000025, country_iso_code: "US", location_type: "City" },
+  { location_code: 9001021, location_name: "Lancaster,California,United States", location_code_parent: 9000023, country_iso_code: "US", location_type: "City" }
 ];
 
 const MAPS_OFFSET = 100000;
