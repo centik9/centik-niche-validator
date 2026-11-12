@@ -327,6 +327,20 @@ function regionForCity(id) {
   return Object.values(USMAP.regions).find((region) => region.cities.some((city) => city.id === id)) || null;
 }
 
+function regionForNamedCity(name, stateName) {
+  if (!USMAP || !name) return null;
+  const cityKey = String(name).toLowerCase();
+  const stateKey = String(stateName || "").toLowerCase();
+  return Object.values(USMAP.regions).find((region) => String(region.state || "").toLowerCase() === stateKey && region.cities.some((city) => city.name.toLowerCase() === cityKey)) || null;
+}
+
+function citySelected(city, region) {
+  if (!state.location || !city) return false;
+  if (city.id && state.location.id === city.id) return true;
+  return city.name.toLowerCase() === String(state.location.name || "").toLowerCase()
+    && String(region && region.state || "").toLowerCase() === String(state.location.state || "").toLowerCase();
+}
+
 function heatDefs(map) {
   const defs = svg("defs", {}, map);
   const glow = svg("filter", { id: "heatglow", x: "-80%", y: "-80%", width: "260%", height: "260%" }, defs);
@@ -507,19 +521,20 @@ function renderRegion(wrap, region) {
   });
   cities.slice().sort((a, b) => a.heat - b.heat).forEach(({ city, heat, card }) => {
     const band = heatOf(heat);
-    const selected = state.location && state.location.id === city.id;
+    const selected = citySelected(city, region);
+    const pick = () => (card ? chooseLocation(card) : selectHeatCity(city, region));
     region.places.filter((place) => place.city === city.name).forEach((place) => {
-      const area = svg("path", { d: place.d, fill: band.color, "fill-opacity": selected ? ".6" : ".42", stroke: selected ? "#ffffff" : band.color, "stroke-width": selected ? "2" : "1.4", filter: "url(#heatglow)", class: card ? "hit" : "" }, areas);
-      svg("title", {}, area).textContent = `${city.name} · sample heat ${heat}${card ? " · click to select" : ""}`;
-      if (card) area.addEventListener("click", () => chooseLocation(card));
+      const area = svg("path", { d: place.d, fill: band.color, "fill-opacity": selected ? ".6" : ".42", stroke: selected ? "#ffffff" : band.color, "stroke-width": selected ? "2" : "1.4", filter: "url(#heatglow)", class: "hit" }, areas);
+      svg("title", {}, area).textContent = `${city.name} · sample heat ${heat} · click to select`;
+      area.addEventListener("click", pick);
     });
     svg("circle", { cx: city.x, cy: city.y, r: 26 + heat / 4, fill: `url(#heatarea${band.cls})`, "pointer-events": "none" }, areas);
-    const hit = svg("g", { class: card ? "hit" : "", tabindex: card ? "0" : "-1", role: card ? "button" : "img", "aria-label": `${city.name}. ${band.word} sample demand, ${heat}.${card ? (selected ? " Selected." : " Select this city.") : " Heat only, not in the example scoring set."}` }, pins);
+    const hit = svg("g", { class: "hit", tabindex: "0", role: "button", "aria-label": `${city.name}. ${band.word} sample demand, ${heat}.${selected ? " Selected." : card ? " Select this city." : " Heat only. Select this city."}` }, pins);
     svg("circle", { cx: city.x, cy: city.y, r: 20, fill: "transparent" }, hit);
     svg("circle", { class: "ring", cx: city.x, cy: city.y, r: selected ? 13 : 10, fill: "none", stroke: selected ? "#ffffff" : band.color, "stroke-opacity": selected ? "1" : ".6", "stroke-width": selected ? 2.5 : 1.5 }, hit);
     svg("circle", { cx: city.x, cy: city.y, r: selected ? 7 : 6, fill: band.color, filter: "url(#heatglow)" }, hit);
-    svg("title", {}, hit).textContent = `${city.name} · sample heat ${heat}${card ? " · click to select" : " · heat only"}`;
-    if (card) activate(hit, () => chooseLocation(card));
+    svg("title", {}, hit).textContent = `${city.name} · sample heat ${heat} · click to select`;
+    activate(hit, pick);
     const [lx, ly, anchor] = spots.get(city.name) || [city.x + 14, city.y - 12, "start"];
     haloText(labels, { x: lx, y: ly, "text-anchor": anchor, "font-size": selected ? 19 : 17, "font-weight": selected ? 750 : 650 }, city.name);
     haloText(labels, { x: lx, y: ly + 18, "text-anchor": anchor, "font-size": 13, fill: band.color, "font-weight": 650, "stroke-width": 3.5 }, `${heat} · ${band.word.toLowerCase()}`);
@@ -532,15 +547,15 @@ function renderRegion(wrap, region) {
   list.replaceChildren();
   cities.slice().sort((a, b) => b.heat - a.heat).forEach(({ city, heat, card }, index) => {
     const band = heatOf(heat);
-    const selected = state.location && state.location.id === city.id;
-    const item = el("li", { class: `${selected ? "sel" : ""}${card ? "" : " off"}`, tabindex: card ? "0" : "-1" }, [
+    const selected = citySelected(city, region);
+    const item = el("li", { class: selected ? "sel" : "", tabindex: "0" }, [
       el("b", {}, [el("i", { class: `hd h${band.cls}` }), `${index + 1}. ${city.name}`, card ? "" : el("span", { class: "tag" }, ["Heat only"])]),
       el("span", { class: "d num" }, [String(heat)]),
       el("small", {}, [card
         ? `${band.word} sample demand. ${selected ? "Selected for Step 3." : "Click to pick this city."}`
-        : `${band.word} sample heat. Not in the example scoring set, so no score.`])
+        : `${band.word} sample heat. ${selected ? "Selected. Example scores are not invented for this city." : "Click to select this city."}`])
     ]);
-    if (card) activate(item, () => chooseLocation(card));
+    activate(item, () => (card ? chooseLocation(card) : selectHeatCity(city, region)));
     list.append(item);
   });
   if (!state.subniche) list.prepend(el("li", { class: "off" }, [el("span", {}, ["Pick a sub-niche in Step 1 to score a city here."])]));
@@ -564,8 +579,9 @@ function renderMap() {
 
 function renderGauge(composite, title, note) {
   $("score-title").textContent = title;
-  const insufficient = Boolean(composite && composite.status === "insufficient_data");
-  const score = composite && composite.status === "calculated" ? Number(composite.composite_display) : null;
+  const insufficient = Boolean(composite && (composite.status === "insufficient_data" || composite.status === "insufficient"));
+  const measuredCheckNeeded = Boolean(composite && composite.status === "insufficient");
+  const score = !insufficient && composite && composite.status === "calculated" ? Number(composite.composite_display) : null;
   const zone = score == null ? null : zoneOf(score);
   const display = insufficient ? "Insufficient data" : (score == null ? "-" : (composite.composite_display || String(Math.round(score))));
   const G = { cx: 180, cy: 168, R: 112 };
@@ -583,7 +599,9 @@ function renderGauge(composite, title, note) {
     class: "dial",
     role: "img",
     "aria-label": insufficient
-      ? "Insufficient data. Demand was not measured, so there is no market score. Missing data is not a score of 0."
+      ? (measuredCheckNeeded
+        ? "Insufficient data. A measured check is needed."
+        : "Insufficient data. Demand was not measured, so there is no market score. Missing data is not a score of 0.")
       : (score == null ? "No market score yet." : `Market score ${display} out of 100. Zone ${zone.name}.`)
   });
   const defs = svg("defs", {}, dial);
@@ -618,7 +636,9 @@ function renderGauge(composite, title, note) {
     : (zone ? el("span", { class: "chip", style: `color:${zoneColor(zone)}` }, [zone.name]) : ""));
   const capNote = composite && composite.grade_cap && composite.grade_cap.applied ? composite.grade_cap.note : "";
   $("verdict").textContent = insufficient
-    ? "Search demand was not returned. This is not a score of 0."
+    ? (measuredCheckNeeded
+      ? "Insufficient data. A measured check is needed."
+      : "Search demand was not returned. This is not a score of 0.")
     : (zone ? zone.line : "The score appears after you pick a city.");
   $("demand-note").textContent = [note || "", capNote].filter(Boolean).join(" ");
   const factors = composite && composite.demand && !insufficient ? [
@@ -628,6 +648,11 @@ function renderGauge(composite, title, note) {
   ] : [];
   const board = $("bd");
   board.replaceChildren();
+  if (insufficient) {
+    board.append(el("p", { class: "help" }, [measuredCheckNeeded
+      ? "Insufficient data. A measured check is needed. Example demand and competition were not invented for this city."
+      : "Search demand was not returned. This is not a score of 0."]));
+  }
   factors.forEach(([name, value, weight, color, points]) => {
     board.append(el("div", { class: "bd-row" }, [
       el("div", { class: "bd-top" }, [
@@ -1144,6 +1169,20 @@ function renderEstimates(proposal, report = state.storedReport) {
     renderEstChart(null);
     return;
   }
+  if (proposal.insufficient_data && !fromCheck) {
+    pill.textContent = "Insufficient data";
+    const avg = averageJob(proposal.price);
+    kpis.append(estKpi("Leads a month", "-", "Insufficient data. A measured check is needed."));
+    kpis.append(estKpi("Revenue a month", "-", "Insufficient data. A measured check is needed.", "rev"));
+    kpis.append(estKpi("Average job", avg == null ? "-" : `$${avg.toLocaleString("en-US")}`, avg == null ? "Needs a published national job price" : "National range, not city adjusted"));
+    const note = $("est-rate-note");
+    if (note) {
+      note.hidden = false;
+      note.textContent = "Insufficient data. A measured check is needed. Example search volume was not invented for this city.";
+    }
+    renderEstChart(null);
+    return;
+  }
   pill.textContent = fromCheck ? "From last check" : "Sample data";
   const subniche = proposal.subniche || {};
   const resolved = LeadConversion.resolveLeadConversion(subniche.id, subniche.label);
@@ -1326,10 +1365,11 @@ function renderResults(message, report) {
     const sampleRivals = composite && composite.competition && composite.competition.competitor_count;
     if (Number.isFinite(sampleSearches)) searches = sampleSearches.toLocaleString("en-US");
     if (Number.isFinite(sampleRivals)) rivals = String(sampleRivals);
-    $("res-pill").textContent = "Sample data";
+    $("res-pill").textContent = state.proposal && state.proposal.insufficient_data ? "Insufficient data" : "Sample data";
   }
-  const caption = real ? "From last check." : "Sample, not live";
-  slot.append(resTile("Monthly searches", searches, searchesCaption, RES_SPARKS.searches, false));
+  const insufficient = !real && Boolean(state.proposal && state.proposal.insufficient_data);
+  const caption = real ? "From last check." : insufficient ? "Insufficient data. A measured check is needed." : "Sample, not live";
+  slot.append(resTile("Monthly searches", searches, real ? searchesCaption : caption, RES_SPARKS.searches, false));
   slot.append(resTile("Map pack rivals", rivals, caption, RES_SPARKS.rivals, false));
   slot.append(resTile("Top ad bid", bid, bid === "Insufficient data" || bid === "$0.00 (measured)" ? searchesCaption : caption, RES_SPARKS.bid, true));
   if (message) slot.append(el("p", { class: message.toLowerCase().includes("not") ? "error res-note" : "help res-note" }, [message]));
@@ -1591,9 +1631,11 @@ async function chooseLocation(card) {
   if (card.geography_type !== "city") return;
   if (!state.subniche) return;
   state.location = card;
-  const home = regionForCity(card.id);
+  const home = regionForCity(card.id) || regionForNamedCity(card.name, card.state);
   if (home) state.mapRegion = home.id;
-  $("live").textContent = `${card.name} picked. Step 2 done. Scoring with sample data.`;
+  const input = $("city-any");
+  if (input && !input.value.trim()) input.value = `${card.name}, ${card.state}`;
+  $("live").textContent = `${card.name}, ${card.state} picked. Step 2 done.`;
   clearStored();
   renderMap();
   state.proposal = await post("/api/microsite", {
@@ -1601,17 +1643,22 @@ async function chooseLocation(card) {
     keyword: state.keyword,
     subniche_id: state.subniche.id,
     subniche_label: state.subniche.label,
-    location_id: card.id
+    location_id: card.id,
+    city: card.name,
+    state: card.state
   });
+  if (state.proposal.location) {
+    state.location = { ...card, id: state.proposal.location.id || card.id, name: state.proposal.location.name, state: state.proposal.location.state, geography_type: "city" };
+  }
   renderGauge(
     state.proposal.composite,
-    `${state.proposal.subniche.label} in ${card.name}, ${card.state}`,
+    `${state.proposal.subniche.label} in ${state.location.name}, ${state.location.state}`,
     state.proposal.deep_check_gate && state.proposal.deep_check_gate.demand_basis_note
   );
   renderEstimates(state.proposal, null);
   renderResults("", null);
   renderSketch(state.proposal);
-  $("score-pill").textContent = "Sample data";
+  $("score-pill").textContent = state.proposal.insufficient_data ? "Insufficient data" : "Sample data";
   if (!state.lensReport && state.subniche) await loadRules(state.subniche.label, card.name, card.state);
   if (state.lensReport && state.lensReport.hard_stop) {
     state.quote = null;
@@ -1787,6 +1834,22 @@ if (findCancel) {
     resetSpecialtyConfirm();
     $("lb-help").textContent = "Canceled. No DataForSEO request was sent.";
   });
+}
+
+const cityAny = $("city-any");
+if (cityAny) {
+  cityAny.addEventListener("input", () => {
+    clearTimeout(citySuggestTimer);
+    showCityMessage("");
+    citySuggestTimer = setTimeout(() => { refreshCitySuggestions(); }, 250);
+  });
+  cityAny.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    confirmTypedCity();
+  });
+  cityAny.addEventListener("change", () => confirmTypedCity());
+  cityAny.addEventListener("blur", () => confirmTypedCity());
 }
 
 $("pay-go").addEventListener("click", runPaid);
@@ -2178,7 +2241,172 @@ function renderShortlist() {
   });
 }
 
-function usePair(row) {
+let cityRequest = 0;
+let citySuggestRequest = 0;
+let citySuggestTimer = 0;
+
+function showCityMessage(text, isError) {
+  const node = $("city-any-msg");
+  if (!node) return;
+  node.textContent = text || "";
+  node.classList.toggle("error", Boolean(isError && text));
+}
+
+function hideCitySuggestions() {
+  const list = $("city-suggest");
+  if (!list) return;
+  list.hidden = true;
+  list.replaceChildren();
+}
+
+function renderCitySuggestions(resolved) {
+  const list = $("city-suggest");
+  if (!list) return;
+  const items = (resolved && resolved.suggestions) || [];
+  list.replaceChildren();
+  if (!items.length) {
+    list.hidden = true;
+    return;
+  }
+  items.forEach((item) => {
+    const button = el("button", { type: "button" }, [item.label || `${item.name}, ${item.state}`]);
+    button.addEventListener("mousedown", (event) => event.preventDefault());
+    button.addEventListener("click", () => {
+      const input = $("city-any");
+      if (input) input.value = `${item.name}, ${item.state}`;
+      confirmTypedCity();
+    });
+    list.append(el("li", {}, [button]));
+  });
+  list.hidden = false;
+}
+
+function clearLocationPick() {
+  state.location = null;
+  state.proposal = null;
+  state.quote = null;
+  clearStored();
+  renderMap();
+  renderGauge(null, state.subniche ? `${state.subniche.label}. Pick a city in Step 2.` : "Pick a sub-niche and a city.", "");
+  renderEstimates(null);
+  renderResults("", null);
+  renderSketch(null);
+  renderQuote(null, null);
+  paintStepper();
+}
+
+function poolCard(place) {
+  const key = (value) => String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\bst\b/g, "saint").replace(/\s+/g, " ").trim();
+  return cityPool().find((card) => card.geography_type === "city" && key(card.name) === key(place.name) && key(card.state) === key(place.state)) || null;
+}
+
+async function refreshCitySuggestions() {
+  const input = $("city-any");
+  if (!input) return;
+  const text = input.value.trim();
+  const requestId = ++citySuggestRequest;
+  if (text.length < 2) {
+    hideCitySuggestions();
+    return;
+  }
+  try {
+    const resolved = await post("/api/microsite", { action: "resolve_city", query: text });
+    if (requestId !== citySuggestRequest) return;
+    renderCitySuggestions(resolved);
+  } catch {
+    if (requestId !== citySuggestRequest) return;
+    hideCitySuggestions();
+  }
+}
+
+async function confirmTypedCity(options = {}) {
+  const input = $("city-any");
+  if (!input) return;
+  citySuggestRequest += 1;
+  const text = input.value.trim();
+  const requestId = ++cityRequest;
+  if (!text) {
+    hideCitySuggestions();
+    showCityMessage("");
+    if (state.location) clearLocationPick();
+    return;
+  }
+  if (!state.subniche) {
+    hideCitySuggestions();
+    showCityMessage("Pick a service in Step 1 first. The city was not selected.", true);
+    return;
+  }
+  let resolved;
+  try {
+    resolved = await post("/api/microsite", {
+      action: "resolve_city",
+      query: text,
+      allow_unique_other_state: options.allowUniqueOtherState === true
+    });
+  } catch (error) {
+    if (requestId !== cityRequest) return;
+    showCityMessage(error.message || "That city was not selected.", true);
+    return;
+  }
+  if (requestId !== cityRequest) return;
+  if (!resolved.selected || !resolved.place) {
+    renderCitySuggestions(resolved);
+    showCityMessage(resolved.message || "That city was not selected.", true);
+    if (state.location) clearLocationPick();
+    return;
+  }
+  const place = resolved.place;
+  input.value = `${place.name}, ${place.state}`;
+  hideCitySuggestions();
+  showCityMessage("");
+  if (state.location && state.location.id === place.id && state.proposal && (state.quote || (state.lensReport && state.lensReport.hard_stop))) {
+    paintStepper();
+    renderMap();
+    return;
+  }
+  const card = poolCard(place) || {
+    id: place.id,
+    geography_type: "city",
+    name: place.name,
+    state: place.state,
+    outside_sample: true
+  };
+  await chooseLocation(card);
+}
+
+function selectHeatCity(city, region) {
+  const input = $("city-any");
+  if (input) input.value = `${city.name}, ${region.state}`;
+  return confirmTypedCity({ allowUniqueOtherState: true });
+}
+
+async function ensureSubniche(keyword) {
+  const text = String(keyword || "").trim();
+  state.keyword = text;
+  if (text.length < 2) return;
+  let suggestion;
+  try {
+    suggestion = await post("/api/microsite", { action: "subniches", keyword: text });
+  } catch {
+    state.subniche = { id: "unranked-keyword", label: text };
+    return;
+  }
+  if (suggestion.needs_confirmation) {
+    state.subniche = { id: "unranked-keyword", label: text };
+    state.rows = [];
+    renderRows();
+    return;
+  }
+  applySubniches(suggestion);
+  const row = (suggestion.subniches && suggestion.subniches[0]) || suggestion.unranked_option;
+  if (!row) {
+    state.subniche = { id: "unranked-keyword", label: text };
+    return;
+  }
+  if (!state.subniche || state.subniche.id !== row.id || !state.cards.length) await chooseSubniche(row);
+}
+
+async function usePair(row) {
   $("keyword").value = row.service;
   state.keyword = row.service;
   const city = $("city-any");
@@ -2188,8 +2416,10 @@ function usePair(row) {
     picked.hidden = false;
     picked.textContent = `Service: ${row.service}. City: ${row.city}, ${row.state}. Step 4 still needs Okay before any paid check.`;
   }
-  $("live").textContent = `Filled ${row.service} in ${row.city}, ${row.state}. Fills Service and City. Runs nothing.`;
-  loadRules(row.service, row.city, row.state);
+  $("live").textContent = `Filled ${row.service} in ${row.city}, ${row.state}. Selecting the city. A paid check still needs Okay.`;
+  await ensureSubniche(row.service);
+  await confirmTypedCity();
+  await loadRules(row.service, row.city, row.state);
 }
 
 function groupRuns(runs) {
@@ -2257,14 +2487,18 @@ function renderHistory(runs) {
   slot.append(el("p", { class: "help" }, ["Open loads the saved check for $0. Nothing calls DataForSEO."]));
 }
 
-function openSaved(run) {
+async function openSaved(run) {
   $("keyword").value = run.niche || "";
   state.keyword = run.niche || "";
   const city = $("city-any");
-  if (city) city.value = `${run.city}, ${run.state}`;
+  if (city) city.value = run.city && run.state ? `${run.city}, ${run.state}` : "";
   setLens(run.lens === "four_yes" ? "four_yes" : "classroom");
   closeHistory();
-  loadRules(run.niche, run.city, run.state);
+  if (run.niche && run.city && run.state) {
+    await ensureSubniche(run.niche);
+    await confirmTypedCity();
+  }
+  await loadRules(run.niche, run.city, run.state);
   const score = run.market_score && Number.isFinite(run.market_score.value) ? run.market_score.value : null;
   const title = `${run.niche} in ${run.city}, ${run.state}`;
   if (score != null) {
@@ -2275,13 +2509,13 @@ function openSaved(run) {
       competition: { index: run.competition && run.competition.value, contribution_display: null },
       margin: { index: run.margin && run.margin.value, contribution_display: null }
     }, title, "Opened a saved check. Nothing calls DataForSEO.");
-  } else {
+  } else if (!state.proposal) {
     renderGauge({
       status: "insufficient_data",
       withheld_reason: "Insufficient data. This saved check has no measured grade."
     }, title, "Opened a saved check. Nothing calls DataForSEO.");
   }
-  $("live").textContent = "Opened the saved check. Nothing calls DataForSEO.";
+  $("live").textContent = "Opened the saved check. The city is selected. Nothing calls DataForSEO until you confirm a paid check.";
 }
 
 async function openCompare(newer, older) {

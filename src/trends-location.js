@@ -75,6 +75,43 @@ function matchCountry(rows, query) {
   return chosen ? present(chosen) : null;
 }
 
+function stateRegionsInclude(locationName, query) {
+  const parts = splitLocationName(locationName);
+  const regionNorms = parts.regions.map((region) => normalizeState(region, query.countryIso));
+  return regionNorms.includes(query.stateNorm);
+}
+
+// City match only. Same state rule as selectTrendsLocation's city and metro
+// checks: a row whose region is a different state is not this market. Metro,
+// state, and country fallbacks are intentionally not used here.
+export function matchCityInState(rows, query) {
+  const city = matchCity(Array.isArray(rows) ? rows : [], query);
+  if (city.outcome === "matched" && city.match && !stateRegionsInclude(city.match.location_name, query)) {
+    return {
+      outcome: "unsupported",
+      match: null,
+      matches: [],
+      same_city_other_regions: city.same_city_other_regions,
+      same_name_other_countries: city.same_name_other_countries,
+      rejected_summary: city.rejected_summary,
+      code_source: city.code_source,
+      state_rejected: true
+    };
+  }
+  if (city.outcome === "ambiguous" && Array.isArray(city.matches)) {
+    const matches = city.matches.filter((match) => stateRegionsInclude(match.location_name, query));
+    if (matches.length !== city.matches.length) {
+      return {
+        ...city,
+        outcome: matches.length === 1 ? "matched" : matches.length > 1 ? "ambiguous" : "unsupported",
+        match: matches.length === 1 ? matches[0] : null,
+        matches
+      };
+    }
+  }
+  return city;
+}
+
 export function selectTrendsLocation(rows, query) {
   const list = Array.isArray(rows) ? rows : [];
   const city = matchCity(list, query);

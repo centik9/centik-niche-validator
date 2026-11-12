@@ -1,10 +1,13 @@
-import { scoreExampleMarket } from "./composite-score.js";
+import { COMPOSITE_MODEL_ID, scoreExampleMarket } from "./composite-score.js";
+import { resolveCityAction, resolveTypedCity } from "./city-pick.js";
 import { nearbyPlaces, PLACES } from "./nearby.js";
 import { priceForServiceNiche } from "./niche-prices.js";
 import { rankByQuery } from "./query-match.js";
 import { HttpError } from "./errors.js";
 import { priceCoverage, priceFor } from "./job-prices.js";
+import { normalizePlace } from "./normalize.js";
 import { screenCandidates } from "./screen.js";
+import { normalizeState } from "./states.js";
 import { inTradePhrase, normalizePhrase, slugForLabel } from "./subniche-discovery.js";
 
 export const FLOW_MODEL_ID = "centik-microsite-flow-v1";
@@ -408,13 +411,135 @@ export async function buildShortlist(body) {
   };
 }
 
+function sameCityName(leftName, leftState, rightName, rightState) {
+  return normalizePlace(leftName) === normalizePlace(rightName)
+    && normalizeState(leftState, "us") === normalizeState(rightState, "us");
+}
+
+function locateProposalPlace(body) {
+  const byId = PROPOSAL_PLACES.find((item) => item.id === body.location_id);
+  if (byId) return { ok: true, location: byId, outside_sample: false };
+  const city = typeof body.city === "string" ? body.city.trim() : "";
+  const state = typeof body.state === "string" ? body.state.trim() : "";
+  if (!city || !state) {
+    return { ok: false, message: "That location is not in the example shortlist." };
+  }
+  const resolved = resolveTypedCity(`${city}, ${state}`);
+  if (!resolved.selected || !resolved.place) {
+    return { ok: false, message: resolved.message || "That city and state were not selected." };
+  }
+  const sample = PROPOSAL_PLACES.find((item) => item.geography_type === "city" && sameCityName(item.name, item.state, resolved.place.name, resolved.place.state));
+  if (sample) return { ok: true, location: sample, outside_sample: false };
+  return {
+    ok: true,
+    outside_sample: true,
+    location: {
+      id: resolved.place.id,
+      geography_type: "city",
+      name: resolved.place.name,
+      state: resolved.place.state,
+      example_deep_check: false
+    }
+  };
+}
+
+function insufficientComposite(price) {
+  const published = Boolean(price && price.status === "published");
+  return {
+    model_id: COMPOSITE_MODEL_ID,
+    status: "insufficient",
+    withheld_reason: "insufficient_data",
+    composite_tenths: null,
+    composite_display: null,
+    band: "missing",
+    clears_green: null,
+    clears_green_label: "not calculated",
+    message: "Insufficient data. A measured check is needed.",
+    weights: { demand: 40, competition: 30, margin: 30 },
+    demand: {
+      label: "INSUFFICIENT",
+      index: null,
+      monthly_searches: null,
+      contribution_display: null,
+      note: "No example demand fixture covers this city. Example searches were not invented. A measured check is needed."
+    },
+    competition: {
+      label: "INSUFFICIENT",
+      competitor_count: null,
+      index: null,
+      contribution_display: null,
+      note: "No example competitor count covers this city. A Maps count was not invented. A measured check is needed."
+    },
+    margin: {
+      status: published ? "published" : "missing",
+      index: null,
+      contribution_display: null,
+      low_dollars: published ? price.low_dollars : null,
+      high_dollars: published ? price.high_dollars : null,
+      sentence: price ? price.sentence : "Price range missing",
+      source_name: price && price.source_name ? price.source_name : null,
+      url: price && price.url ? price.url : null,
+      accessed: price ? price.accessed : null,
+      city_adjusted: false,
+      scope: "national_united_states",
+      note: "A national price, when one is published, is not a city score. Demand and competition are missing, so the composite was not calculated."
+    }
+  };
+}
+
+function insufficientProposal(context, subniche, location, price) {
+  const slug = `${location.name}-${subniche.label}`.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  const composite = insufficientComposite(price);
+  return {
+    model_id: FLOW_MODEL_ID,
+    data_origin: "insufficient",
+    example_data: false,
+    insufficient_data: true,
+    paid_dataforseo_called: false,
+    prototype_only: true,
+    microsite_name: `${location.name} ${subniche.label}`,
+    suggested_domain: `${slug}.example`,
+    domain_availability: "not_checked",
+    domain_note: "The .example domain is a suggestion shape. Availability was not checked. Nothing is registered or purchased.",
+    pages: [
+      { name: "Home", purpose: "State the service and the city in one sentence." },
+      { name: "Services", purpose: `List ${subniche.label.toLowerCase()} as the focus, with room for neighboring tasks.` },
+      { name: "Service area", purpose: `Name ${location.name}, ${location.state}. This sketch is not a verified territory.` },
+      { name: "Contact", purpose: "Leave a placeholder for a phone number and a form. No number is supplied here." }
+    ],
+    headline: `Example angle: ${subniche.label} for homes around ${location.name}.`,
+    claims_not_made: [
+      "No claim that a person is licensed, insured, or available.",
+      "No price, guarantee, or emergency-response promise.",
+      "No website is created and no domain is bought.",
+      "No example search volume or competitor count was invented for this city."
+    ],
+    yes_means: "Yes stores a prototype choice in this session only. It does not authorize spending, publishing, or a paid data call.",
+    location: { id: location.id, name: location.name, state: location.state, geography_type: "city" },
+    subniche: { id: subniche.id, label: subniche.label },
+    keyword: context.keyword,
+    price,
+    composite,
+    deep_check_gate: {
+      paid_calls_allowed: false,
+      clears_green: null,
+      gate_line: "Insufficient data. A measured check is needed. Okay is still required before a paid check.",
+      demand_basis_note: "Insufficient data. A measured check is needed. Example demand and competition were not invented for this city.",
+      example_check_available: false,
+      reason: "This city is outside the example scoring set. No sample score was invented. A paid check still waits for Okay."
+    }
+  };
+}
+
 export function buildProposal(body) {
   const context = requireKeyword(body);
   const { suggestion, subniche } = selectedSubniche(context.keyword, body.subniche_id, body);
-  const location = PROPOSAL_PLACES.find((item) => item.id === body.location_id);
-  if (!location) throw new HttpError(400, "inconsistent_choice", "That location is not in the example shortlist.");
-  const demand = demandFor(location, subniche.id, suggestion.ranking_kind);
+  const located = locateProposalPlace(body);
+  if (!located.ok) throw new HttpError(400, "inconsistent_choice", located.message);
+  const location = located.location;
   const price = subniche.price || priceFor(subniche.id);
+  if (located.outside_sample) return insufficientProposal(context, subniche, location, price);
+  const demand = demandFor(location, subniche.id, suggestion.ranking_kind);
   const composite = scoreExampleMarket({
     exampleRelativeDemand: demand.exampleRelativeDemand,
     exampleMonthlySearches: demand.exampleMonthlySearches,
@@ -448,6 +573,7 @@ export function buildProposal(body) {
     location: { id: location.id, name: location.name, state: location.state, geography_type: location.geography_type },
     subniche: { id: subniche.id, label: subniche.label },
     keyword: context.keyword,
+    insufficient_data: false,
     price,
     composite,
     deep_check_gate: {
@@ -481,5 +607,8 @@ export async function micrositeAction(body) {
   }
   if (body.action === "shortlist") return buildShortlist(body);
   if (body.action === "proposal") return buildProposal(body);
-  throw new HttpError(400, "invalid_input", "Action must be subniches, shortlist, or proposal.");
+  if (body.action === "resolve_city") {
+    return { model_id: FLOW_MODEL_ID, ...resolveCityAction(body) };
+  }
+  throw new HttpError(400, "invalid_input", "Action must be subniches, shortlist, proposal, or resolve_city.");
 }
