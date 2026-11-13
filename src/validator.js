@@ -140,6 +140,7 @@ async function resolvePrepared(prepared, deps) {
     },
     outcome,
     can_validate: outcome === "matched" || outcome === "partial_match" || outcome === "partial_failure",
+    block_message: BLOCK_MESSAGE[outcome] || null,
     google_ads: googleAds,
     google_maps: googleMaps,
     requests,
