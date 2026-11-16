@@ -21,5 +21,6 @@ export const STANDING_LIMITATIONS = [
   "The combined index is a weighted heuristic with the bands and weights in this response. It is not a grade, not a recommendation, and not an economic valuation.",
   "The combined index is withheld when demand is missing, unsupported, or failed, and when the Maps sample is missing or measured as zero listings. Missing demand is insufficient data, not a measured zero. An empty Maps sample is not scored as an open market. A measured zero demand grade cannot rise above a clear fail.",
   "Example mode returns fixture data from this repository. Example mode is not a measurement of the city you typed, and example location codes are not DataForSEO codes.",
+  "Conversion readiness, ads market, and results risk are extra signals. They do not change the grade, the composite, the four yes test, or the map pack. A missing signal is not a zero.",
   "Live Step 1 specialties come from United States keyword ideas. Phrases from other trades are removed. A thin in-trade result is reported as thin. The example trade list is not substituted for a live lookup."
 ];

@@ -11,6 +11,9 @@ const FIELDS = [
   ["average_job", "Average job"],
   ["volume", "Volume"],
   ["map_pack", "Map pack"],
+  ["conversion_readiness", "Conversion readiness"],
+  ["ads_market", "Ads market"],
+  ["results_risk", "Results risk"],
   ["lens_verdict", "Lens verdict"]
 ];
 

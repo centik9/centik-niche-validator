@@ -169,14 +169,14 @@ test("a live check uses Maps depth 100 and does not derive competition from dema
       confirmed: confirmedFrom(resolved)
     };
     const quoted = await (await postJson(port, "/api/quote", payload)).json();
-    assert.equal(quoted.estimated_cost_usd, 0.375);
-    assert.equal(quoted.calls.length, 7);
-    assert.equal(quoted.calls.reduce((sum, call) => sum + Math.round(call.estimated_cost_usd * 1000), 0), 375);
+    assert.equal(quoted.estimated_cost_usd, 0.381);
+    assert.equal(quoted.calls.length, 10);
+    assert.equal(quoted.calls.reduce((sum, call) => sum + Math.round(call.estimated_cost_usd * 1000), 0), 381);
     const firstResponse = await postJson(port, "/api/validate", { ...payload, spend_token: quoted.spend_token });
     const first = await firstResponse.json();
     assert.equal(firstResponse.status, 200);
     assert.equal(first.maps.requested_depth, 100);
-    assert.equal(quoted.estimated_cost_usd, 0.375);
+    assert.equal(quoted.estimated_cost_usd, 0.381);
     assert.equal(quoted.calls.find((call) => call.path.endsWith("/maps/live/advanced")).depth, 100);
     assert.equal(quoted.calls.find((call) => call.path.endsWith("/maps/live/advanced")).estimated_cost_usd, 0.002);
     assert.equal(first.city_market.live, true);

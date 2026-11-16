@@ -109,7 +109,7 @@ test("a saved result survives a new gate and is not billed again after a day", a
   const rerun = await restarted.quote(EMAIL, prepared, { rerun: true });
   assert.equal(rerun.cache_hit, false);
   assert.equal(rerun.estimated_cost_usd, WORST_CASE_QUERY_COST_USD);
-  assert.equal(rerun.calls.length, 7);
+  assert.equal(rerun.calls.length, 10);
   const accepted = await restarted.accept(rerun.spend_token, EMAIL, prepared, { rerun: true });
   assert.equal(accepted.ok, true);
   assert.equal(accepted.cache_hit, false);
@@ -240,7 +240,7 @@ test("a restarted server quotes a durable hit at $0 and a rerun is a new paid ch
     const rerunQuote = await (await postJson(port, "/api/quote", { ...payload, rerun: true })).json();
     assert.equal(rerunQuote.cache_hit, false);
     assert.equal(rerunQuote.estimated_cost_usd, WORST_CASE_QUERY_COST_USD);
-    assert.equal(rerunQuote.calls.length, 7);
+    assert.equal(rerunQuote.calls.length, 10);
     const rerun = await (await postJson(port, "/api/validate", {
       ...payload,
       rerun: true,

@@ -9,6 +9,8 @@ import {
   MAX_UPSTREAM_BYTES,
   ORGANIC_DEPTH,
   ORGANIC_PATH,
+  ADS_ADVERTISERS_PATH,
+  ADS_SEARCH_PATH,
   BING_SEARCH_VOLUME_PATH,
   SEARCH_VOLUME_PATH,
   TRENDS_PATH,
@@ -25,6 +27,8 @@ const BING_VOLUME_FIELDS = new Set(["keywords", "location_code", "language_code"
 const MAPS_FIELDS = new Set(["keyword", "location_code", "language_code", "depth", "device", "os", "search_this_area"]);
 const ORGANIC_FIELDS = new Set(["keyword", "location_code", "language_code", "depth", "device", "os"]);
 const TRENDS_FIELDS = new Set(["keywords", "location_code", "language_code", "type", "time_range", "item_types"]);
+const ADS_ADVERTISERS_FIELDS = new Set(["keyword", "location_name"]);
+const ADS_SEARCH_FIELDS = new Set(["advertiser_ids", "location_name"]);
 const KEYWORD_IDEAS_FIELDS = new Set([
   "keywords",
   "location_code",
@@ -156,6 +160,38 @@ export function assertSafeRequest({ method, path, body }) {
     }
     const extra = Object.keys(task).filter((key) => !TRENDS_FIELDS.has(key));
     if (extra.length) refused(`Unexpected Trends fields: ${extra.join(",")}.`);
+    return;
+  }
+  if (method === "POST" && path === ADS_ADVERTISERS_PATH) {
+    const task = assertOneTask(body, "Ads advertisers");
+    assertKeyword(task.keyword, "Keyword");
+    if (SEARCH_OPERATOR.test(task.keyword)) refused("Ads advertiser keywords must not include search operators.");
+    if ("location_code" in task || "location_coordinate" in task || "priority" in task || "date_from" in task || "date_to" in task) {
+      refused("Ads advertisers sends a location name only. Location codes, coordinates, priority, and dates are not sent.");
+    }
+    if (typeof task.location_name !== "string" || task.location_name.trim().length < 3 || task.location_name.length > 200) {
+      refused("Ads advertisers location_name must be 3 to 200 characters.");
+    }
+    const extra = Object.keys(task).filter((key) => !ADS_ADVERTISERS_FIELDS.has(key));
+    if (extra.length) refused(`Unexpected ads advertisers fields: ${extra.join(",")}.`);
+    return;
+  }
+  if (method === "POST" && path === ADS_SEARCH_PATH) {
+    const task = assertOneTask(body, "Ads search");
+    if (!Array.isArray(task.advertiser_ids) || task.advertiser_ids.length < 1 || task.advertiser_ids.length > 25) {
+      refused("Ads search sends 1 to 25 advertiser ids.");
+    }
+    for (const id of task.advertiser_ids) {
+      if (typeof id !== "string" || !/^AR\d{5,32}$/.test(id)) refused("Ads search advertiser ids must look like AR followed by digits.");
+    }
+    if ("depth" in task || "priority" in task || "target" in task || "location_code" in task || "keyword" in task) {
+      refused("Ads search does not send depth, priority, target, keyword, or a location code. Depth stays at the default 40.");
+    }
+    if (typeof task.location_name !== "string" || task.location_name.trim().length < 3 || task.location_name.length > 200) {
+      refused("Ads search location_name must be 3 to 200 characters.");
+    }
+    const extra = Object.keys(task).filter((key) => !ADS_SEARCH_FIELDS.has(key));
+    if (extra.length) refused(`Unexpected ads search fields: ${extra.join(",")}.`);
     return;
   }
   if (method === "POST" && path === KEYWORD_IDEAS_PATH) {

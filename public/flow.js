@@ -542,7 +542,7 @@ function renderGate() {
   const slot = $("deep-slot");
   slot.replaceChildren();
   slot.append(el("p", { class: "notice" }, [liveReady
-    ? "Live mode is on. The confirm step reserves the worst case, $0.375: the $0.105 city check (Google Ads $0.09, Maps depth 100 $0.002, organic $0.002, Trends $0.011) plus a DMA volume call, a state volume call, and a Bing volume call at $0.09 each. Those three run only if city Google Ads volume is blank or near zero. A saved result for the same niche and city is not charged again until you rerun the paid check."
+    ? "Live mode is on. The confirm step reserves the worst case, $0.381: the $0.109 city check (Google Ads $0.09, Maps depth 100 $0.002, organic $0.002, Trends $0.011, two Ads Transparency advertiser calls at $0.002) plus an Ads search call at $0.002 when advertiser ids come back, and a DMA volume call, a state volume call, and a Bing volume call at $0.09 each. The volume calls run only if city Google Ads volume is blank or near zero. A saved result for the same niche and city is not charged again until you rerun the paid check."
     : "Paid DataForSEO check is off. Yes did not authorize spending."]));
   slot.append(el("p", {}, [gate.reason]));
   if (!gate.example_check_available) {

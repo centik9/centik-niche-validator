@@ -128,7 +128,22 @@ export function snapshotFromValidation(report, extras) {
     average_job: rangeField("unavailable", null, null, true, "Job price range was not stored on the check."),
     volume: numberField(volume === null ? "unavailable" : (demandEstimated ? "estimated" : (example ? "example" : "measured")), volume, example || demandEstimated, demandEstimated ? fallback.label : (example ? "Sample, not live" : "From last check search volume")),
     map_pack: numberField(listings === null ? "unavailable" : (example ? "example" : "measured"), listings, example, example ? "Sample, not live" : "Maps sample listings. Not an exhaustive pack."),
-    grade: numberField(calculated ? (demandEstimated ? "estimated" : (example ? "example" : "measured")) : "unavailable", calculated ? score.overall : null, example || demandEstimated, demandEstimated ? fallback.label : "Market score. Not a classroom or four-yes grade.")
+    grade: numberField(calculated ? (demandEstimated ? "estimated" : (example ? "example" : "measured")) : "unavailable", calculated ? score.overall : null, example || demandEstimated, demandEstimated ? fallback.label : "Market score. Not a classroom or four-yes grade."),
+    ...signalFields(report, example)
+  };
+}
+
+function signalFields(report, example) {
+  const fieldFor = (block, note) => {
+    if (!block || !Number.isInteger(block.score)) {
+      return numberField("unavailable", null, false, block && block.coverage ? block.coverage.label : "Not measured.");
+    }
+    return numberField(example ? "example" : "measured", block.score, example, example ? "Sample, not live" : note);
+  };
+  return {
+    conversion_readiness: fieldFor(report.conversion_readiness, "Conversion readiness. Not the market grade."),
+    ads_market: fieldFor(report.ads_market, "Ads market. Not the market grade."),
+    results_risk: fieldFor(report.results_risk, "Results risk. Higher means more complaints. Not the market grade.")
   };
 }
 
@@ -199,6 +214,7 @@ const PUBLIC_FIELDS = [
   "other_lens", "other_lens_label", "other_lens_verdict", "lenses_disagree",
   "market_score", "zone", "demand", "competition", "margin",
     "leads", "revenue", "average_job", "volume", "map_pack", "incumbent_ratings", "grade",
+    "conversion_readiness", "ads_market", "results_risk",
     "maps_depth", "check_version"
 ];
 
