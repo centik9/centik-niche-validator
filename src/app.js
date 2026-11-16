@@ -470,7 +470,8 @@ export function createApp(options = {}) {
     }
     if (pathname === "/api/discover") {
       const report = discoverShortlist(json || {}, {
-        extract: json && json.mode === "free" ? (options.extract || loadExtractCatalog()) : null
+        extract: json && json.mode === "free" ? (options.extract || loadExtractCatalog()) : (options.extract || null),
+        loadExtract: loadExtractCatalog
       });
       send(res, 200, report);
       return;

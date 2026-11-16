@@ -350,6 +350,17 @@ export function familyOf(service) {
   if (text.includes("crawl")) return "crawl-space";
   if (/locksmith|lockout|rekey|re-key/.test(text)) return "locksmith";
   if (text.includes("plumb")) return "plumbing";
+  if (/\bweld/.test(text)) return "welding";
+  if (/\bfoundation|\bwaterproof|\bfrench drain|\bpier and beam|\bslab leak/.test(text)) return "foundation";
+  if (/\broof/.test(text)) return "roofing";
+  if (/\bhvac\b|\bfurnace\b|\bheat pump\b|\bair condition/.test(text)) return "hvac";
+  if (/\belectric/.test(text)) return "electrician";
+  if (/garage door/.test(text)) return "garage-door";
+  if (/\bgutter/.test(text)) return "gutter";
+  if (/\bpest\b|\btermite\b|\brodent\b/.test(text)) return "pest";
+  if (/\bpaint/.test(text)) return "painting";
+  if (/\bconcrete\b/.test(text)) return "concrete";
+  if (/\bfloor/.test(text)) return "flooring";
   return null;
 }
 

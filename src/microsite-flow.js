@@ -81,6 +81,14 @@ const SERVICE_NICHES = [
 ];
 
 const TRADE_PATTERN = /hvac|furnace|heat pump|air conditioning|\bac\b|locksmith|lockout|rekey|garage door|electrician|electrical|retaining|weld|crawl/;
+const JOB_WORDS = new Set(["repair", "repairs", "repairing", "service", "services", "installation", "install", "replacement", "replace", "near", "me"]);
+
+function plumbingSpecific(ranked) {
+  return ranked.some((item) => {
+    const terms = item.match && Array.isArray(item.match.matched_terms) ? item.match.matched_terms : [];
+    return terms.some((term) => !JOB_WORDS.has(term));
+  });
+}
 
 function serviceRows(keyword) {
   const rows = SERVICE_NICHES.map(([id, label, exampleStrength]) => {
@@ -144,7 +152,7 @@ export function suggestSubniches(keyword) {
   }
   const ranked = rankByQuery(text, PLUMBING_SUBNICHES.map((item) => scoredSubniche(item, item.example_strength)));
   const tradeQuery = TRADE_PATTERN.test(text.toLowerCase());
-  const known = text.toLowerCase().includes("plumb") || (!tradeQuery && ranked.some((item) => item.match.tier !== "none"));
+  const known = text.toLowerCase().includes("plumb") || (!tradeQuery && plumbingSpecific(ranked));
   if (!known && tradeQuery) {
     const subniches = serviceRows(text);
     return {

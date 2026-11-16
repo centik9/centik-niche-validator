@@ -1,5 +1,6 @@
 import { HttpError } from "./errors.js";
 import { createGeoIndex, matchCandidate } from "./geo-match.js";
+import { loadExtractCatalog } from "./screen.js";
 import { evaluateLenses, normalizeLens } from "./lenses.js";
 import {
   DISCOVERY_FIXTURES,
@@ -7,6 +8,12 @@ import {
   familyOf,
   nationalGuide
 } from "./discovery-fixtures.js";
+import {
+  SHORTLIST_CENSUS_SOURCE,
+  buildRegionCandidates,
+  matchShortlistServices,
+  parseDiscoveryRegion
+} from "./shortlist-match.js";
 
 export const DISCOVERY_MODEL_ID = "centik-discovery-v1";
 
@@ -93,7 +100,7 @@ const RESEARCH_DISPLAY = {
 function presentRow(row) {
   const display = RESEARCH_DISPLAY[row.id];
   if (display) Object.assign(row, display);
-  if (row.census) {
+  if (row.census && row.census.keep_measured_housing_age !== true) {
     row.census.housing_age = { status: "not_fetched", value: null, note: "Not in source method" };
   }
   return row;
@@ -296,6 +303,94 @@ function cleanCandidate(item) {
   return { city, state, service };
 }
 
+function censusExtract(options) {
+  if (options.extract && options.extract.places) return options.extract;
+  if (options.loadExtract === null) return null;
+  if (typeof options.loadExtract === "function") return options.loadExtract();
+  return loadExtractCatalog();
+}
+
+function regionShell({ service, lens, mode, region, rows, message, services }) {
+  const published = rows.some((row) => row.price && row.price.status === "published");
+  return {
+    model_id: DISCOVERY_MODEL_ID,
+    paid_dataforseo_called: false,
+    dataforseo_called: false,
+    mode,
+    service,
+    lens,
+    region: region.label,
+    region_scope: region.scope,
+    region_input: region.input,
+    state_usps: region.state ? region.state.usps : null,
+    services: services.map((entry) => ({ id: entry.id, label: entry.label, family: entry.family })),
+    worked_example: null,
+    place_source: SHORTLIST_CENSUS_SOURCE,
+    sources: [
+      { id: "acs-2023-places", label: SHORTLIST_CENSUS_SOURCE, used: true },
+      { id: "service-catalog", label: "Service catalog and wording on file, including close matches such as welding and foundation repair.", used: true },
+      { id: "price-guides", label: "Published national price guides already on file.", used: published },
+      { id: "dataforseo", label: "DataForSEO", used: false }
+    ],
+    rows,
+    omitted_unmeasured: 0,
+    fallback_surfaced: false,
+    fallback_id: null,
+    message,
+    excluded: [
+      { label: "Hard stop", detail: "Locksmith, any city. Rank Expand flags it don't-do-first. This holds in both lenses." },
+      { label: "Skipped", detail: "Murfreesboro, Midlothian, Coral Gables, and A&BW: already built or in progress." }
+    ],
+    limits: [
+      "This shortlist does not call DataForSEO. Search volume, CPC, and competitor counts are not measured.",
+      "Cities come from the larger municipal places in the bundled 2023 ACS extract for the region you entered.",
+      "Rank uses measured housing units and owner-occupancy inside that group. Foundation and crawl-space niches also use older housing when it was measured.",
+      "A published price is a national guide already on file. It is not a city average. A missing price was not invented.",
+      "Locksmith stays a hard stop in both lenses."
+    ]
+  };
+}
+
+function discoverRegion(input, context) {
+  const region = parseDiscoveryRegion(input.region);
+  const services = matchShortlistServices(context.service);
+  if (!services.length) {
+    return regionShell({
+      ...context,
+      region,
+      rows: [],
+      services,
+      message: `No shortlist for "${context.service}". It did not match a service on file. Nothing was invented.`
+    });
+  }
+  const extract = censusExtract(context.options || {});
+  if (!extract || !extract.places) {
+    return regionShell({
+      ...context,
+      region,
+      rows: [],
+      services,
+      message: "No shortlist. The Census place extract was not available. Nothing was invented."
+    });
+  }
+  const built = buildRegionCandidates(services, region, extract, context.options || {});
+  const ranked = rankDiscovery(built, { lens: context.lens });
+  ranked.rows.sort((left, right) => (right.rank_score || 0) - (left.rank_score || 0) || String(left.city).localeCompare(String(right.city)));
+  ranked.rows.forEach((row, index) => {
+    row.position = index + 1;
+  });
+  const message = ranked.rows.length
+    ? null
+    : "No shortlist. No Census place in that region had a measured owner-occupancy rate. Nothing was invented.";
+  return regionShell({
+    ...context,
+    region,
+    rows: ranked.rows,
+    services,
+    message
+  });
+}
+
 export function discoverShortlist(input = {}, options = {}) {
   const mode = input.mode === undefined || input.mode === "" ? "example" : input.mode;
   if (mode !== "example" && mode !== "free") {
@@ -306,6 +401,9 @@ export function discoverShortlist(input = {}, options = {}) {
     throw new HttpError(400, "invalid_input", "Enter a service of 2 to 80 characters.");
   }
   const lens = normalizeLens(input.lens);
+  if (Object.prototype.hasOwnProperty.call(input, "region")) {
+    return discoverRegion(input, { service, lens, mode, options });
+  }
   const named = (Array.isArray(input.candidates) ? input.candidates : []).map(cleanCandidate).filter(Boolean).slice(0, 20);
   const fixtures = (options.fixtures || DISCOVERY_FIXTURES).map((row) => structuredClone(row));
   const wanted = new Set();

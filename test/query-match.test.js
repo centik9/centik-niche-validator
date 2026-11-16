@@ -43,4 +43,8 @@ test("specific query words move the matching sub-niche up without changing its c
   assert.equal(queriedDrain.composite.composite_display, plainDrain.composite.composite_display);
   assert.ok(queriedDrain.example_rank < plainDrain.example_rank);
   assert.deepEqual(specificTerms("leak!"), ["leak"]);
+  const foundation = suggestSubniches("foundation repair");
+  assert.equal(foundation.known_profile, false);
+  assert.equal(foundation.subniches.length, 0);
+  assert.equal(foundation.unranked_option.label, "foundation repair");
 });
