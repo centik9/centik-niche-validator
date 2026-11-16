@@ -1301,15 +1301,15 @@ function renderQuote(quote, proposal) {
   const breakdown = chargeCalls.length
     ? `${chargeCalls.map((call) => `${call.purpose} ${quoteMoney(call.estimated_cost_usd)}`).join(". ")}. Total ${quoteMoney(chargeCost)}. Location lists are free and are not in this cost.${worstCaseNote}`
     : "";
-  if (!liveMode && !stored && calls) {
+  if (!liveMode && calls) {
     calls.replaceChildren(el("li", {}, ["Example data only. No DataForSEO request is sent."]));
   }
   $("paid-note").textContent = locked
     ? "Hard stop. Step 4 stays locked."
-    : stored
-      ? "This starts a new paid DataForSEO run and will be charged."
-      : !liveMode
-        ? "Live mode is off. Okay runs example data for this city. No DataForSEO request is sent."
+    : !liveMode
+      ? "Live mode is off. Okay runs example data for this city. No DataForSEO request is sent."
+      : stored
+        ? "This starts a new paid DataForSEO run and will be charged."
         : breakdown;
   const heading = $("h-paid");
   if (heading) heading.textContent = stored && !state.rerunArmed ? "Saved check" : (!liveMode ? "Example check" : "Confirm paid check");
