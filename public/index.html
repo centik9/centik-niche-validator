@@ -27,7 +27,7 @@
     <div class="disc">
       <form class="disc-form" id="disc-form">
         <label class="field"><span>Region</span><input id="disc-region" value="Any US state" autocomplete="off"></label>
-        <label class="field"><span>Service ideas (optional)</span><input id="disc-ideas" value="retaining walls, septic, driveways, crawl space" autocomplete="off"></label>
+        <label class="field"><span>Service</span><input id="disc-ideas" value="retaining walls, septic, driveways, crawl space" autocomplete="off"></label>
         <div class="field"><span>Skip markets already built or in progress</span>
           <div class="chips"><span class="tag">Murfreesboro</span><span class="tag">Midlothian</span><span class="tag">Coral Gables</span><span class="tag">A&amp;BW</span></div>
         </div>
@@ -35,15 +35,14 @@
         <p class="free-line" id="shortlist-free">This is free. It does not run a paid check.</p>
         <progress id="shortlist-progress" max="1" value="0" hidden>Shortlist progress</progress>
         <div class="srcs"><h3>What the shortlist reads</h3><ol>
-          <li>Census QuickFacts: population, owner-occupancy, median home value</li>
-          <li>Price guides and contractor pages for ticket ranges</li>
-          <li>Contractor first-party pages that name the town</li>
-          <li>Maps place lookups for incumbents (not an ordered pack)</li>
-          <li>Rank Expand flagged niches and Abel's skip list</li>
+          <li>Bundled Census ACS 2023 places in the region you type: owner-occupancy and occupied homes</li>
+          <li>The service list on file, including close wording such as welding or foundation repair</li>
+          <li>A published national price guide when one is already on file</li>
+          <li>Rank Expand hard stops, including locksmith</li>
         </ol></div>
       </form>
       <div>
-        <p class="help" id="shortlist-note">Order follows the research notes. There is no fit score.</p>
+        <p class="help" id="shortlist-note">Cities come from Census places for the region you type. Search volume, CPC, and competitor counts stay Not measured.</p>
         <ol class="sl" id="shortlist"></ol>
         <div class="excl"><h3>Not on the list, and why</h3>
           <ul>

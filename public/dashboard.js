@@ -194,12 +194,33 @@ async function requestSpecialties(confirming) {
   }
 }
 
-async function post(pathname, body) {
-  const response = await fetch(pathname, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body)
-  });
+function readableFetchError(error) {
+  const name = error && error.name;
+  if (name === "AbortError" || name === "TimeoutError") return "The request timed out. Nothing was sent.";
+  const message = error && error.message ? String(error.message) : "";
+  if (error instanceof TypeError || /load failed|failed to fetch|networkerror/i.test(message)) {
+    return "The request did not complete. Check the connection and try again.";
+  }
+  return message || "The request did not complete. Check the connection and try again.";
+}
+
+async function post(pathname, body, options = {}) {
+  const timeoutMs = Number(options.timeoutMs) || 0;
+  const controller = timeoutMs > 0 ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+  let response;
+  try {
+    response = await fetch(pathname, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: controller ? controller.signal : undefined
+    });
+  } catch (error) {
+    throw new Error(readableFetchError(error));
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
     const error = new Error(payload.message || "Request failed.");
@@ -2218,25 +2239,44 @@ function renderRules() {
   out.append(verdict, list, standing);
 }
 
+function signalText(field, measuredText) {
+  if (field && (field.status === "measured" || field.status === "measured_zero") && typeof measuredText === "string") return measuredText;
+  if (field && field.status === "not_fetched") return "Not fetched";
+  return "Not measured";
+}
+
 async function generateShortlist() {
   const ideas = ($("disc-ideas") && $("disc-ideas").value.trim()) || state.keyword;
   if (!ideas || ideas.length < 2) {
-    $("shortlist-note").textContent = "Enter a service idea first. No rows were invented.";
+    $("shortlist-note").textContent = "Enter a service first. No rows were invented.";
     return;
   }
+  const region = $("disc-region") ? $("disc-region").value : "";
   const progress = $("shortlist-progress");
   progress.hidden = false;
   progress.value = 0;
   try {
-    const report = await post("/api/discover", { service: ideas, lens: state.lens, mode: "example" });
+    const report = await post("/api/discover", {
+      service: ideas,
+      region,
+      lens: state.lens,
+      mode: "example"
+    }, { timeoutMs: 20000 });
     progress.value = 1;
     state.discovery = report;
     renderShortlist();
-    $("live").textContent = report.rows && report.rows.length
-      ? "Shortlist ready. This is free. It does not run a paid check."
+    const count = report.rows ? report.rows.length : 0;
+    if ($("shortlist-note")) {
+      $("shortlist-note").textContent = count
+        ? `${count} ${count === 1 ? "pair" : "pairs"} in ${report.region || "that region"}. Search volume, CPC, and competitor counts are not measured.`
+        : (report.message || "No shortlist. Nothing was invented.");
+    }
+    $("live").textContent = count
+      ? `Shortlist ready for ${report.region || "that region"}. This is free. It does not run a paid check.`
       : (report.message || "No shortlist. Nothing was invented.");
   } catch (error) {
-    state.discovery = { rows: [], message: error.message || "The shortlist failed. No rows were invented." };
+    const message = readableFetchError(error);
+    state.discovery = { rows: [], message: message || "The shortlist failed. No rows were invented." };
     renderShortlist();
     $("shortlist-note").textContent = state.discovery.message;
   } finally {
@@ -2257,14 +2297,17 @@ function renderShortlist() {
   rows.forEach((row) => {
     const chip = row.lens_chip || {};
     const owner = row.census && row.census.owner_occupancy_rate;
-    const ownerText = owner && owner.status === "measured" ? `${Math.round(owner.value * 1000) / 10}%` : "Not on file";
+    const ownerText = signalText(owner, owner && typeof owner.value === "number" ? `${Math.round(owner.value * 1000) / 10}%` : "");
     const population = row.census && row.census.population;
-    const popText = population && population.status === "measured" ? population.value.toLocaleString("en-US") : "Not on file";
+    const popText = signalText(population, population && typeof population.value === "number" ? population.value.toLocaleString("en-US") : "");
     const home = row.census && row.census.median_home_value;
-    const homeText = home && home.status === "measured" ? `$${home.value.toLocaleString("en-US")}` : "Not on file";
+    const homeText = signalText(home, home && typeof home.value === "number" ? `$${home.value.toLocaleString("en-US")}` : "");
+    const age = row.census && row.census.housing_age;
+    const ageText = signalText(age, age && typeof age.value === "number" ? `${Math.round(age.value * 1000) / 10}%` : "");
     const ratings = row.competition && Number.isInteger(row.competition.strongest_in_town_ratings)
       ? `${row.competition.strongest_in_town_ratings} ratings`
-      : "Not on file";
+      : signalText(row.competition && row.competition.map_pack === "not_fetched" ? { status: "not_fetched" } : null, "");
+    const priceKnown = row.price && row.price.status === "published" && Number.isInteger(row.price.low_dollars);
     const item = el("li", { class: `sl-row${row.status_tag === "Fallback for #1" || row.surfaced_as === "fallback" ? " fallback" : ""}` }, [
       el("div", { class: "sl-rk num" }, [String(row.position)]),
       el("div", {}, [
@@ -2274,19 +2317,19 @@ function renderShortlist() {
           el("div", { class: "sig" }, [el("span", { class: "l" }, ["Owner-occupied"]), el("span", { class: "v num" }, [ownerText])]),
           el("div", { class: "sig" }, [el("span", { class: "l" }, ["Population"]), el("span", { class: "v num" }, [popText])]),
           el("div", { class: "sig" }, [el("span", { class: "l" }, ["Median home value"]), el("span", { class: "v num" }, [homeText])]),
-          el("div", { class: row.price && row.price.status === "published" ? "sig" : "sig miss" }, [
-            el("span", { class: "l" }, ["Job ticket ", el("span", { class: "est-tag" }, ["EST."])]),
-            el("span", { class: "v num est-val" }, [row.price && row.price.status === "published" ? moneyRange(row.price) : "Not on file"])
+          el("div", { class: priceKnown ? "sig" : "sig miss" }, [
+            el("span", { class: "l" }, ["Job ticket", priceKnown && row.price.estimated ? el("span", { class: "est-tag" }, [" EST."]) : ""]),
+            el("span", { class: "v num est-val" }, [priceKnown ? moneyRange(row.price) : "Not measured"])
           ]),
-          el("div", { class: "sig" }, [el("span", { class: "l" }, ["Top Maps incumbent seen"]), el("span", { class: "v num" }, [ratings])]),
-          el("div", { class: "sig" }, [el("span", { class: "l" }, ["Named operators"]), el("span", { class: "v num" }, [row.named_label || "Not on file"])]),
-          el("div", { class: "sig miss" }, [el("span", { class: "l" }, ["Housing age"]), el("span", { class: "v num" }, ["Not fetched"]), el("span", { class: "s" }, ["Not in source method"])])
+          el("div", { class: Number.isInteger(row.competition && row.competition.strongest_in_town_ratings) ? "sig" : "sig miss" }, [el("span", { class: "l" }, ["Top Maps incumbent seen"]), el("span", { class: "v num" }, [ratings])]),
+          el("div", { class: row.named_label && row.named_label !== "Not measured" ? "sig" : "sig miss" }, [el("span", { class: "l" }, ["Named operators"]), el("span", { class: "v num" }, [row.named_label && row.named_label !== "Not measured" ? row.named_label : "Not measured"])]),
+          el("div", { class: age && age.status === "measured" ? "sig" : "sig miss" }, [el("span", { class: "l" }, ["Housing age"]), el("span", { class: "v num" }, [ageText])])
         ]),
         el("p", { class: "why" }, [row.why ? `Why here: ${row.why}` : ""]),
         row.fallback_reason ? el("p", { class: "fb-note" }, [el("span", { class: "fb-k" }, ["Fallback reason: pack density "]), row.fallback_reason]) : ""
       ]),
       el("div", { class: "sl-side" }, [
-        el("span", { class: "verdict-chip v-unk" }, [verdictWord(chip.verdict)]),
+        el("span", { class: `verdict-chip ${chip.verdict === "hard_stop" ? "v-stop" : chip.verdict === "pass" ? "v-pass" : chip.verdict === "fail" ? "v-fail" : "v-unk"}` }, [verdictWord(chip.verdict)]),
         chip.disagree ? el("small", { class: "help" }, [`${chip.other_label}: ${verdictWord(chip.other_verdict)}`]) : "",
         el("button", { class: "btn ghost cy sm", type: "button" }, ["Use this pair"]),
         el("small", { class: "help" }, ["Fills Service and City. Runs nothing."])
@@ -2662,6 +2705,13 @@ function closeHistory() {
 }
 
 $("generate-shortlist").addEventListener("click", generateShortlist);
+const discForm = $("disc-form");
+if (discForm) {
+  discForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    generateShortlist();
+  });
+}
 $("open-history").addEventListener("click", openHistory);
 $("close-history").addEventListener("click", closeHistory);
 $("history-back").addEventListener("click", () => renderHistory(state.runs));
