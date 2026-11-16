@@ -12,9 +12,15 @@ import {
   createSpendGate,
   quotedPaidCalls
 } from "../src/spend.js";
+import { resolveMetroMembership } from "../src/metro-membership.js";
+import { selectVolumeLocations } from "../src/trends-location.js";
 import {
+  BING_BROADER_ESTIMATE_LABEL,
+  BING_CITY_ESTIMATE_LABEL,
+  BING_CORROBORATION_NOTE,
   CITY_CORE_VOLUME_THRESHOLD,
   FALLBACK_ESTIMATE_LABEL,
+  buildVolumeEstimate,
   housingShareFor,
   scaleVolume
 } from "../src/volume-fallback.js";
@@ -135,6 +141,15 @@ test("occupied-housing share scales a broader volume and does not invent populat
   assert.equal(austin.city_occupied, 440294);
   assert.equal(austin.broader_occupied, 948649);
   assert.equal(austin.geography, "census_metro");
+  assert.equal(austin.membership, "census_cbsa");
+  assert.equal(austin.cbsa, "12420");
+  const leland = housingShareFor({ city: "Leland", state: "North Carolina", level: "metro" });
+  assert.equal(leland.city_occupied, 11258);
+  assert.equal(leland.broader_occupied, 190964);
+  assert.equal(leland.census_name, "Wilmington, NC Metro Area");
+  assert.equal(leland.cbsa, "48900");
+  assert.equal(leland.membership, "census_cbsa");
+  assert.equal(scaleVolume(100000, leland.city_occupied, leland.broader_occupied), 5895);
 });
 
 test("all-null city volume falls back to a DMA hit and does not call the state", async () => {
@@ -149,6 +164,10 @@ test("all-null city volume falls back to a DMA hit and does not call the state",
   assert.equal(report.demand.volume_fallback.estimate.value, 120);
   assert.equal(report.demand.volume_fallback.estimate.measured_city_data, false);
   assert.equal(report.demand.volume_fallback.estimate.label, FALLBACK_ESTIMATE_LABEL);
+  assert.equal(report.demand.volume_fallback.estimate.value_source, "google_ads_metro");
+  assert.equal(report.demand.volume_fallback.estimate.bing_note, null);
+  assert.equal(report.demand.volume_fallback.metro_membership.dma_basis, "namesake_and_census_cbsa");
+  assert.equal(report.demand.volume_fallback.metro_membership.cbsa, "12420");
   const dmaRaw = report.demand.volume_fallback.estimate.raw_broader_volumes.find((row) => row.level === "metro");
   assert.equal(dmaRaw.clustered_volume, 1200);
   assert.equal(dmaRaw.scaled_city_volume, 120);
@@ -173,6 +192,7 @@ test("a null DMA falls through to the state volume", async () => {
   });
   assert.equal(report.demand.search_volume.value, null);
   assert.equal(report.demand.volume_fallback.estimate.value, 500);
+  assert.equal(report.demand.volume_fallback.estimate.value_source, "google_ads_state");
   assert.equal(report.demand.volume_fallback.estimate.label, FALLBACK_ESTIMATE_LABEL);
   assert.equal(report.demand.volume_fallback.estimate.measured_city_data, false);
   const stateRaw = report.demand.volume_fallback.estimate.raw_broader_volumes.find((row) => row.level === "state");
@@ -184,7 +204,7 @@ test("a null DMA falls through to the state volume", async () => {
   assert.equal(posts.some((call) => call.location_code === stateCode), true);
 });
 
-test("Bing volume contributes the minimum scaled estimate and stays labeled as broader data", async () => {
+test("Bing does not lower a positive Google Ads estimate", async () => {
   const bingRows = [
     { location_code: 2840, location_name: "United States", location_code_parent: null, country_iso_code: "US", location_type: "Country" },
     { location_code: 400, location_name: "Texas,United States", location_code_parent: 2840, country_iso_code: "US", location_type: "State" }
@@ -194,16 +214,197 @@ test("Bing volume contributes the minimum scaled estimate and stays labeled as b
     bingVolumes: { 400: 500 },
     bingRows
   });
-  assert.equal(report.demand.volume_fallback.estimate.value, 50);
+  assert.equal(report.demand.volume_fallback.estimate.value, 200);
+  assert.equal(report.demand.volume_fallback.estimate.value_source, "google_ads_state");
+  assert.equal(report.demand.volume_fallback.estimate.bing_used_for_value, false);
+  assert.equal(report.demand.volume_fallback.estimate.bing_note, BING_CORROBORATION_NOTE);
   assert.equal(report.demand.volume_fallback.estimate.label, FALLBACK_ESTIMATE_LABEL);
   assert.equal(report.demand.volume_fallback.estimate.measured_city_data, false);
+  assert.match(report.demand.volume_fallback.estimate.note, /Bing also shows demand/);
   const raw = report.demand.volume_fallback.estimate.raw_broader_volumes;
   assert.equal(raw.find((row) => row.source === "google_ads" && row.level === "state").clustered_volume, 2000);
+  assert.equal(raw.find((row) => row.source === "google_ads" && row.level === "state").scaled_city_volume, 200);
   assert.equal(raw.find((row) => row.source === "bing").clustered_volume, 500);
   assert.equal(raw.find((row) => row.source === "bing").scaled_city_volume, 50);
+  assert.equal(report.score.inputs.estimated_city_volume, 200);
   assert.equal(report.score.grade_state, "estimated");
   assert.notEqual(report.demand.search_volume.status, "measured");
   assert.equal(posts.some((call) => call.path === BING_SEARCH_VOLUME_PATH && call.location_code === 400), true);
+});
+
+test("Bing sets the estimate only when Google Ads has no positive scaled estimate", async () => {
+  const bingRows = [
+    { location_code: 2840, location_name: "United States", location_code_parent: null, country_iso_code: "US", location_type: "Country" },
+    { location_code: 400, location_name: "Texas,United States", location_code_parent: 2840, country_iso_code: "US", location_type: "State" }
+  ];
+  const { report } = await runCheck({
+    googleVolumes: { 101: null, 202: null, 21176: null },
+    bingVolumes: { 400: 500 },
+    bingRows
+  });
+  assert.equal(report.demand.search_volume.value, null);
+  assert.equal(report.demand.volume_fallback.estimate.value, 50);
+  assert.equal(report.demand.volume_fallback.estimate.value_source, "bing_backup");
+  assert.equal(report.demand.volume_fallback.estimate.bing_used_for_value, true);
+  assert.equal(report.demand.volume_fallback.estimate.bing_note, null);
+  assert.equal(report.demand.volume_fallback.estimate.label, BING_BROADER_ESTIMATE_LABEL);
+  assert.equal(report.demand.volume_fallback.estimate.measured_city_data, false);
+  assert.equal(report.score.grade_state, "estimated");
+  assert.equal(report.score.inputs.estimated_city_volume, 50);
+
+  const cityOnly = buildVolumeEstimate([
+    { source: "google_ads", level: "metro", broader_than_city: true, queried: true, clustered_volume: null, clustered_status: "missing" },
+    { source: "google_ads", level: "state", broader_than_city: true, queried: true, clustered_volume: null, clustered_status: "missing" },
+    { source: "bing", level: "city", broader_than_city: false, queried: true, clustered_volume: 40, clustered_status: "measured", numeric_month_count: 12 }
+  ], () => null);
+  assert.equal(cityOnly.estimate.value, 40);
+  assert.equal(cityOnly.estimate.value_source, "bing_backup");
+  assert.equal(cityOnly.estimate.label, BING_CITY_ESTIMATE_LABEL);
+  assert.equal(cityOnly.estimate.measured_city_data, false);
+});
+
+test("a positive Google metro estimate stands when the state and Bing estimates are smaller", () => {
+  const built = buildVolumeEstimate([
+    { source: "google_ads", level: "metro", broader_than_city: true, queried: true, clustered_volume: 5000, clustered_status: "measured", numeric_month_count: 12, location_name: "Austin,Texas,United States" },
+    { source: "google_ads", level: "state", broader_than_city: true, queried: true, clustered_volume: 1000, clustered_status: "measured", numeric_month_count: 12, location_name: "Texas,United States" },
+    { source: "bing", level: "state", broader_than_city: true, queried: true, clustered_volume: 100, clustered_status: "measured", numeric_month_count: 12, location_name: "Texas,United States" }
+  ], () => ({ status: "measured", basis: "occupied_housing_units", city_occupied: 1000, broader_occupied: 10000 }));
+  assert.equal(built.estimate.value, 500);
+  assert.equal(built.estimate.value_source, "google_ads_metro");
+  assert.equal(built.estimate.label, FALLBACK_ESTIMATE_LABEL);
+  assert.equal(built.estimate.bing_used_for_value, false);
+  assert.equal(built.estimate.bing_note, BING_CORROBORATION_NOTE);
+  assert.equal(built.estimate.measured_city_data, false);
+  assert.equal(built.estimate.winning_sources.length, 1);
+  assert.equal(built.estimate.winning_sources[0].source, "google_ads");
+  assert.equal(built.estimate.winning_sources[0].level, "metro");
+});
+
+test("Leland uses the Wilmington DMA and Wilmington metro housing, and does not call the state", async () => {
+  const stateCode = 21160;
+  const dmaCode = 200550;
+  const cityCode = 3737680;
+  const ads = [
+    { location_code: 2840, location_name: "United States", location_code_parent: null, country_iso_code: "US", location_type: "Country" },
+    { location_code: stateCode, location_name: "North Carolina,United States", location_code_parent: 2840, country_iso_code: "US", location_type: "State" },
+    { location_code: cityCode, location_name: "Leland,North Carolina,United States", location_code_parent: stateCode, country_iso_code: "US", location_type: "City" },
+    { location_code: dmaCode, location_name: "Wilmington,North Carolina,United States", location_code_parent: 2840, country_iso_code: "US", location_type: "DMA Region" },
+    { location_code: 200517, location_name: "Charlotte,North Carolina,United States", location_code_parent: 2840, country_iso_code: "US", location_type: "DMA Region" }
+  ];
+  const transport = scriptedTransport({ [cityCode]: null, [dmaCode]: 100000, [stateCode]: 900000, 200517: 900000 }, {});
+  const deps = {
+    ...exampleDeps(transport),
+    directory: directoryFor(ads, []),
+    origin: "live"
+  };
+  const resolution = await resolveLocation({ city: "Leland", state: "North Carolina", country: "United States" }, deps);
+  assert.equal(resolution.google_ads.match.location_code, cityCode);
+  const report = await validateNiche({
+    niche: "septic installation",
+    city: "Leland",
+    state: "North Carolina",
+    country: "United States",
+    margin_index: 40,
+    confirmed: confirmedFrom(resolution)
+  }, deps);
+  const share = housingShareFor({ city: "Leland", state: "North Carolina", level: "metro" });
+  const expected = scaleVolume(100000, share.city_occupied, share.broader_occupied);
+  assert.equal(share.city_occupied, 11258);
+  assert.equal(share.broader_occupied, 190964);
+  assert.equal(expected, 5895);
+  assert.equal(report.demand.search_volume.value, null);
+  assert.equal(report.demand.volume_fallback.estimate.status, "estimated");
+  assert.equal(report.demand.volume_fallback.estimate.value, expected);
+  assert.equal(report.demand.volume_fallback.estimate.value_source, "google_ads_metro");
+  assert.equal(report.demand.volume_fallback.estimate.measured_city_data, false);
+  assert.equal(report.demand.volume_fallback.estimate.label, FALLBACK_ESTIMATE_LABEL);
+  assert.equal(report.demand.volume_fallback.metro_membership.status, "matched");
+  assert.equal(report.demand.volume_fallback.metro_membership.cbsa, "48900");
+  assert.deepEqual(report.demand.volume_fallback.metro_membership.counties, ["37019"]);
+  assert.equal(report.demand.volume_fallback.metro_membership.census_name, "Wilmington, NC Metro Area");
+  assert.equal(report.demand.volume_fallback.metro_membership.dma_basis, "census_cbsa");
+  assert.equal(report.demand.volume_fallback.metro_membership.dma_skip_reason, null);
+  const dmaAttempt = report.demand.volume_fallback.attempts.find((row) => row.source === "google_ads" && row.level === "metro");
+  assert.equal(dmaAttempt.queried, true);
+  assert.equal(dmaAttempt.location_code, dmaCode);
+  assert.equal(dmaAttempt.location_name, "Wilmington,North Carolina,United States");
+  assert.equal(dmaAttempt.share.city_occupied, 11258);
+  assert.equal(dmaAttempt.share.broader_occupied, 190964);
+  assert.equal(dmaAttempt.share.census_name, "Wilmington, NC Metro Area");
+  assert.equal(dmaAttempt.scaled_city_volume, expected);
+  const stateAttempt = report.demand.volume_fallback.attempts.find((row) => row.source === "google_ads" && row.level === "state");
+  assert.equal(stateAttempt.queried, false);
+  assert.equal(transport.posts.some((call) => call.location_code === dmaCode && call.path === SEARCH_VOLUME_PATH), true);
+  assert.equal(transport.posts.some((call) => call.location_code === stateCode), false);
+  assert.equal(transport.posts.some((call) => call.location_code === 200517), false);
+  assert.equal(transport.posts.some((call) => call.path === BING_SEARCH_VOLUME_PATH), false);
+  assert.equal(report.score.grade_state, "estimated");
+  assert.equal(report.score.inputs.search_volume, null);
+  assert.equal(report.score.inputs.estimated_city_volume, expected);
+});
+
+test("county membership picks the containing DMA and does not guess when it is ambiguous", () => {
+  const leland = resolveMetroMembership({ city: "Leland", state: "North Carolina" });
+  assert.equal(leland.status, "matched");
+  assert.equal(leland.cbsa, "48900");
+  assert.deepEqual(leland.counties, ["37019"]);
+  assert.equal(leland.primary_city_norm, "wilmington");
+  const roundRock = resolveMetroMembership({ city: "Round Rock", state: "Texas" });
+  assert.equal(roundRock.status, "matched");
+  assert.equal(roundRock.cbsa, "12420");
+  assert.equal(roundRock.primary_city_norm, "austin");
+  const austin = resolveMetroMembership({ city: "Austin", state: "Texas" });
+  assert.equal(austin.status, "matched");
+  assert.equal(austin.cbsa, "12420");
+  assert.equal(austin.primary_city_norm, "austin");
+
+  const query = { cityNorm: "austin", stateNorm: "texas", countryIso: "us", codeSource: "test" };
+  const namesake = selectVolumeLocations(adsRows(), query, {
+    status: "missing",
+    reason: "The bundled Census place-county file has no county for this place, so no containing metro was assigned.",
+    primary_city_norm: null,
+    state_names: []
+  });
+  assert.equal(namesake.dma.location_code, 202);
+  assert.equal(namesake.dma_basis, "namesake");
+
+  const ambiguous = selectVolumeLocations(adsRows(), query, {
+    status: "ambiguous",
+    reason: "The Census counties for this place do not all belong to one CBSA. No DMA was selected.",
+    primary_city_norm: "austin",
+    state_names: ["texas"]
+  });
+  assert.equal(ambiguous.dma, null);
+  assert.equal(ambiguous.dma_basis, null);
+  assert.match(ambiguous.dma_skip_reason, /do not all belong to one CBSA/);
+
+  const outside = selectVolumeLocations(adsRows(), query, {
+    status: "not_in_cbsa",
+    reason: "Every Census county for this place is outside a CBSA, so no metro DMA was assigned."
+  });
+  assert.equal(outside.dma, null);
+  assert.match(outside.dma_skip_reason, /outside a CBSA/);
+
+  const conflictRows = [
+    { location_code: 21160, location_name: "North Carolina,United States", location_code_parent: 2840, country_iso_code: "US", location_type: "State" },
+    { location_code: 200550, location_name: "Wilmington,North Carolina,United States", location_code_parent: 2840, country_iso_code: "US", location_type: "DMA Region" },
+    { location_code: 200517, location_name: "Charlotte,North Carolina,United States", location_code_parent: 2840, country_iso_code: "US", location_type: "DMA Region" }
+  ];
+  const conflict = selectVolumeLocations(conflictRows, {
+    cityNorm: "wilmington",
+    stateNorm: "north carolina",
+    countryIso: "us"
+  }, {
+    status: "matched",
+    census_name: "Charlotte-Concord-Gastonia, NC-SC Metro Area",
+    cbsa: "16740",
+    primary_city: "Charlotte",
+    primary_city_norm: "charlotte",
+    title_norm: "charlotte concord gastonia",
+    state_names: ["north carolina", "south carolina"]
+  });
+  assert.equal(conflict.dma, null);
+  assert.match(conflict.dma_skip_reason, /Neither DMA was used/);
 });
 
 test("blank city, DMA, state, and Bing volumes stay withheld", async () => {

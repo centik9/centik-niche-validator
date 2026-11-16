@@ -23,6 +23,7 @@ import { combineLocationOutcomes, matchCity } from "./locations.js";
 import { mapsFromError, mapsNotSent, parseMapsPayload } from "./maps.js";
 import { organicFromError, organicNotSent, parseOrganicPayload } from "./organic.js";
 import { trendsFromError, trendsNotSent, parseTrendsPayload } from "./trends.js";
+import { resolveMetroMembership } from "./metro-membership.js";
 import { selectBingVolumeLocation, selectTrendsLocation, selectVolumeLocations } from "./trends-location.js";
 import { ADS_COST_USD, BING_VOLUME_COST_USD } from "./spend.js";
 import {
@@ -302,7 +303,7 @@ function fallbackAudit(attempt) {
   };
 }
 
-function finishBroaden(report, decision, built) {
+function finishBroaden(report, decision, built, metroMembership) {
   return {
     report: {
       ...report,
@@ -311,6 +312,7 @@ function finishBroaden(report, decision, built) {
         reason: decision.reason,
         threshold: CITY_CORE_VOLUME_THRESHOLD,
         city_core_total: decision.core_total,
+        metro_membership: metroMembership,
         estimate: built.estimate,
         attempts: built.attempts
       }
@@ -335,14 +337,15 @@ async function broadenDemand(report, prepared, deps) {
   } catch {
     adsRows = [];
   }
-  const locations = selectVolumeLocations(adsRows, query);
+  const membership = resolveMetroMembership({ city: prepared.city, state: prepared.state });
+  const locations = selectVolumeLocations(adsRows, query, membership);
   const attempts = [];
   let dmaReport = null;
   if (locations.dma) {
     dmaReport = await requestVolume(prepared, locations.dma, SEARCH_VOLUME_PATH, deps);
     attempts.push(attemptFrom("google_ads", "metro", locations.dma, true, dmaReport, true));
   } else {
-    attempts.push(attemptFrom("google_ads", "metro", null, true, null, false, "No single DMA Region row is named for this city in this state. A small city inside another DMA was not guessed."));
+    attempts.push(attemptFrom("google_ads", "metro", null, true, null, false, locations.dma_skip_reason || "No Google Ads DMA was selected."));
   }
   const dmaUsable = Boolean(dmaReport) && !broaderVolumeIsBlank(dmaReport);
   if (!dmaUsable && locations.state) {
@@ -387,7 +390,7 @@ async function broadenDemand(report, prepared, deps) {
     ));
     built = buildVolumeEstimate(replaced, shareFor);
   }
-  return finishBroaden(report, decision, built);
+  return finishBroaden(report, decision, built, locations.membership);
 }
 
 async function broadenOrReport(report, audit, prepared, deps) {

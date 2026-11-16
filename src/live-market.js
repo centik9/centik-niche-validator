@@ -69,7 +69,7 @@ export function cityMarketFromReports(demand, maps, origin) {
     estimated_city_volume: estimate ? estimate.value : null,
     demand_index_input: estimate ? "volume_fallback_estimate" : "clustered_coverage_volume",
     demand_index_note: estimate
-      ? `${estimate.label}. ${estimate.method} The city search_volume field is unchanged.`
+      ? `${estimate.label}. ${estimate.bing_note ? `${estimate.bing_note} ` : ""}${estimate.method} The city search_volume field is unchanged.`
       : "The demand index is the band of clustered coverage volume. The core term volume is search_volume and is not the index input. Missing keyword rows are omitted from the sum, not entered as zero.",
     unique_listings: listings,
     listings_without_website: listings === null ? null : withoutWebsite,

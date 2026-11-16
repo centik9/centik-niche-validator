@@ -618,7 +618,7 @@ async function runExampleCheck() {
       result.append(el("p", { class: "score-number" }, [score.overall_display]));
       result.append(el("p", {}, [
         score.grade_state === "estimated"
-          ? `${score.demand_estimate_label || "estimated from metro/state/Bing data, broader than the city"}. Not a measured city volume and not a recommendation.`
+          ? `${score.demand_estimate_label || "estimated from metro/state data, broader than the city"}. Not a measured city volume and not a recommendation.`
           : (report.city_market && report.city_market.live ? "Live Google data. Not a recommendation." : "Example data. Not a recommendation.")
       ]));
     }

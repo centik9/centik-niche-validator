@@ -1367,7 +1367,7 @@ function renderResults(message, report) {
     else if (real) rivals = "Insufficient data";
     bid = real || cpc ? moneyText(cpc) : "-";
     $("res-pill").textContent = real ? "Live Google data" : "Sample data";
-    if (estimate && estimate.status === "estimated") searchesCaption = estimate.label || "estimated from metro/state/Bing data, broader than the city";
+    if (estimate && estimate.status === "estimated") searchesCaption = estimate.label || "estimated from metro/state data, broader than the city";
     else if (real && volume && volume.status === "measured_zero") searchesCaption = "Measured zero, not missing.";
     else if (real && (!volume || volume.value == null || volume.status === "missing" || volume.status === "failed" || volume.status === "unusable")) searchesCaption = "Source returned nothing.";
   } else {
@@ -1612,7 +1612,7 @@ function showStored(report) {
       demand: { index: report.score.inputs && report.score.inputs.demand_index, contribution_display: null, label: report.score.demand_estimate_label },
       competition: { index: report.city_market && report.city_market.competition_index, contribution_display: null },
       margin: { index: null, contribution_display: null }
-    }, title, `${gaugeNote} ${report.score.demand_estimate_label || "estimated from metro/state/Bing data, broader than the city"}`);
+    }, title, `${gaugeNote} ${report.score.demand_estimate_label || "estimated from metro/state data, broader than the city"}`);
   } else if (report.score && report.score.grade_state === "capped_fail") {
     renderGauge({
       status: "calculated",

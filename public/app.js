@@ -280,7 +280,7 @@ function renderReport() {
   const scoreBlock = el("div", {}, [el("h3", {}, ["Combined heuristic index"])]);
   if (score && score.grade_state === "estimated") {
     scoreBlock.append(el("p", { class: "score-number" }, [`${score.overall_display} (estimated)`]));
-    scoreBlock.append(el("p", {}, [score.demand_estimate_label || "estimated from metro/state/Bing data, broader than the city"]));
+    scoreBlock.append(el("p", {}, [score.demand_estimate_label || "estimated from metro/state data, broader than the city"]));
     scoreBlock.append(el("p", {}, ["This grade uses a fallback estimate. It is not a measured city volume."]));
   } else if (score && score.grade_state === "insufficient_data") {
     scoreBlock.append(el("p", { class: "score-withheld" }, ["Insufficient data"]));

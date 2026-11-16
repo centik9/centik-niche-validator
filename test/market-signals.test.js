@@ -167,7 +167,7 @@ test("the result cache key cannot replay a volume-only or depth-20 check", async
     }
   });
   const key = resultCacheKey(bind);
-  assert.match(key, /microsite-v3/);
+  assert.match(key, /microsite-v4/);
   assert.match(key, /maps100/);
   assert.match(key, /organic10/);
   assert.match(key, /trends-explore-12m/);

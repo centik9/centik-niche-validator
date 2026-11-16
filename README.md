@@ -71,7 +71,7 @@ Soil is the share of rated SSURGO component acres whose highest representative l
 
 A matched city can be copied into the deep-check form. A county or metro cannot. Sending `geography_type` of `county` or `metro` to `/api/resolve` or `/api/validate` returns 400 and does not call DataForSEO. The copy step does not resolve a location and does not start a paid check. Census place names and DataForSEO city names are different directories, so the deep check still has to resolve the city.
 
-Rebuild the ACS extract with `node scripts/build-acs-extract.mjs`. That download is large and is not part of `npm test`.
+Rebuild the ACS extract with `node scripts/build-acs-extract.mjs`. That download is large and is not part of `npm test`. Rebuild the place-to-county and county-to-CBSA map with `node scripts/build-metro-membership.mjs`. That script downloads the Census files and writes `data/metro-membership.json`. It is not part of `npm test`.
 
 ## What a result is
 
@@ -91,9 +91,9 @@ Google Ads often returns null, or a count at or below 10, for a long-tail phrase
 
 When every packed city volume is null, or the clustered city total is at or below 10, and the check is live, the app asks for more volume before it withholds the grade:
 
-1. Google Ads search volume for the DMA, only when the Google Ads location list has exactly one DMA Region whose name is this city in this state. A small city inside a DMA named for another city is not guessed.
+1. Google Ads search volume for the DMA the city belongs to. The bundled map goes from the Census place to its county or counties (`data/metro-membership.json`, from the 2020 Census place-by-county file), then from the county to one July 2023 CBSA. The Google Ads row must be one DMA Region whose name is that CBSA's primary city, in a state the CBSA title lists. Leland, North Carolina is in Brunswick County, so the call is the Wilmington, North Carolina DMA, not a DMA named Leland and not the state. A namesake DMA, the row named for the city itself, is still used when the county map is missing, and when the namesake row is the same DMA as the CBSA. If the counties disagree, the place is outside every CBSA, or more than one DMA row matches, no DMA is chosen and the reason is stored on `demand.volume_fallback.metro_membership`.
 2. If that DMA volume is missing, at or below 10, or cannot be scaled, Google Ads search volume for the state.
-3. Bing Ads search volume (`POST /v3/keywords_data/bing/search_volume/live`) at the Bing city, or else the nearest Bing metro or state. National Bing volume is not requested. Bing is requested whenever the city Google Ads volume was blank or near zero, including when a DMA volume is usable.
+3. Bing Ads search volume (`POST /v3/keywords_data/bing/search_volume/live`) at the Bing city, or else the nearest Bing metro or state. National Bing volume is not requested. Bing is still requested whenever the city Google Ads volume was blank or near zero. It does not set the estimate when a Google Ads source scaled to a positive number.
 
 The city estimate is:
 
@@ -101,15 +101,17 @@ The city estimate is:
 round(broader clustered volume × city occupied housing units / broader occupied housing units)
 ```
 
-Rounding is half away from zero. Occupied housing is the bundled 2023 ACS 5-year extract: the Census place for the city, the sum of that state's counties for a state volume, and the Census metro whose title starts with this city for a namesake DMA. The extract has housing counts, not population, so the share is occupied housing, not a headcount. Bella Vista, Arkansas is 12,894 occupied units out of 1,189,160 in Arkansas counties.
+Rounding is half away from zero. Occupied housing is the bundled 2023 ACS 5-year extract: the Census place for the city, the sum of that state's counties for a state volume, and the Census CBSA that contains the place for a DMA volume. A namesake DMA, used only when the county map is missing, still scales by the Census metro whose title starts with the city. The extract has housing counts, not population, so the share is occupied housing, not a headcount. Bella Vista, Arkansas is 12,894 occupied units out of 1,189,160 in Arkansas counties. Leland is 11,258 occupied units out of 190,964 in the Wilmington, NC metro.
 
-When more than one of those sources produces a positive scaled estimate, the city estimate is the minimum. A larger geography cannot raise a smaller one. Bing volume whose location is the Bing city is not scaled. It is still not a Google Ads city measurement.
+Google Ads sets the value. A positive scaled metro estimate is the value, including when a state estimate is also positive, because the metro is the geography the city belongs to. The state estimate is used only when the metro estimate is not positive. Within that one Google level, the minimum is used. Bing sets the value only when no Google Ads source has a positive scaled estimate. Bing volume at a Bing city is not scaled. When Google Ads sets the value and Bing's clustered volume is positive, the note says `Bing also shows demand` and the Bing number stays on `raw_broader_volumes`. It does not lower the Google estimate.
 
-The API object is `demand.volume_fallback`. An estimate has `measured_city_data: false`. When the winning source is broader than the city, `label` is `estimated from metro/state/Bing data, broader than the city`. Raw broader clustered volumes, location names, and the housing counts are on `raw_broader_volumes`. The grade state is `estimated`. The city `search_volume` field stays the city Google Ads figure.
+The API object is `demand.volume_fallback`. An estimate has `measured_city_data: false`. A Google Ads metro or state winner is labeled `estimated from metro/state data, broader than the city`. A Bing winner that is broader than the city is labeled `estimated from Bing data, broader than the city`. A Bing city winner is labeled `estimated from Bing data, not measured Google Ads city volume`. Raw broader clustered volumes, location names, and the housing counts are on `raw_broader_volumes`. The grade state is `estimated`. The city `search_volume` field stays the city Google Ads figure.
 
 If every fallback is null, or none can be scaled to a positive city estimate, no estimate is scored. A city that was itself a measured zero keeps the clear-fail cap. A city that was null stays `insufficient_data`.
 
-`POST /api/quote` reserves the worst case before confirm: the base `$0.105` plus a DMA Google Ads call (`$0.09`), a state Google Ads call (`$0.09`), and a Bing call (`$0.09`). That total is `$0.375` (`WORST_CASE_QUERY_COST_USD`). The three extra calls run only when the city volume is blank or near zero, and the state call is skipped when the DMA volume can be scaled. The `$10` cap checks this worst case. The ledger stores the calls that were actually sent. `QUERY_COST_USD` stays `0.105`. Maps depth stays 100. The result cache version is `microsite-v3`, so a check saved before this fallback is not reused as the current result.
+`POST /api/quote` reserves the worst case before confirm: the base `$0.105` plus a DMA Google Ads call (`$0.09`), a state Google Ads call (`$0.09`), and a Bing call (`$0.09`). That total is `$0.375` (`WORST_CASE_QUERY_COST_USD`). The three extra calls run only when the city volume is blank or near zero, and the state call is skipped when the DMA volume can be scaled. The `$10` cap checks this worst case. The ledger stores the calls that were actually sent. `QUERY_COST_USD` stays `0.105`. Maps depth stays 100. The result cache version is `microsite-v4`, so a check saved before this metro membership fix is not reused as the current result.
+
+The DMA call is scaled by Census CBSA housing, not by a Nielsen county file. A DMA can include counties outside that CBSA, and a county outside every CBSA does not get a guessed DMA. Connecticut's 2020 county codes do not join the 2023 planning regions in the ACS extract, so those places stay on the namesake-or-state path. Google Trends still starts at a namesake DMA, not at the containing metro.
 
 ## What this version does not do
 
@@ -122,6 +124,7 @@ If every fallback is null, or none can be scaled to a positive city estimate, no
 - It does not treat `is_claimed` as a verified buyer. It means the Google listing has a claimed owner.
 - It does not pick a city by a partial or wrong-state name. `Springfield` in Illinois is not Springfield in Missouri or Massachusetts. `Portland` in Maine is not Portland in Oregon, and it is not South Portland. `Omaha` in Texas is not Omaha in Nebraska. `Bella Vista` in Arkansas is not Bella Vista in California. `Lancaster` in Ohio is not Lancaster in Pennsylvania or California. A city that cannot be confirmed in the chosen state is an error. Another state's row is not used.
 - It does not send a Google Ads location code to the Maps endpoint, or the reverse. The two products have separate location lists.
+- It does not guess a DMA when the Census counties disagree, when the county is outside every CBSA, or when more than one Google Ads DMA row matches. It does not let a Bing volume lower a positive Google Ads estimate.
 - Example mode does not measure the city you typed. The banner says so. Fixture niches such as `missing volume` are exact phrases for the built-in fixture only. Live mode sends the keyword as typed.
 
 ## Run locally

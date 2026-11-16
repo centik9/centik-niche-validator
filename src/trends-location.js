@@ -111,11 +111,98 @@ export function matchCityInState(rows, query) {
   return city;
 }
 
-export function selectVolumeLocations(rows, query) {
-  const list = Array.isArray(rows) ? rows : [];
+function matchDmaForMembership(rows, query, membership) {
+  const wanted = new Set([membership.primary_city_norm, membership.title_norm].filter(Boolean));
+  const allowed = new Set(membership.state_names || []);
+  const hits = [];
+  const seen = new Set();
+  for (const row of rows) {
+    if (!usable(row, query)) continue;
+    if (!METRO_TYPES.has(String(row.location_type || "").toLowerCase())) continue;
+    if (seen.has(row.location_code)) continue;
+    const parts = splitLocationName(row.location_name);
+    if (!wanted.has(normalizePlace(parts.place))) continue;
+    const regionNorms = parts.regions.map((region) => normalizeState(region, query.countryIso));
+    if (!regionNorms.some((region) => allowed.has(region))) continue;
+    seen.add(row.location_code);
+    hits.push(row);
+  }
+  if (hits.length === 1) return { outcome: "matched", match: present(hits[0]) };
+  if (hits.length > 1) {
+    return {
+      outcome: "ambiguous",
+      reason: `More than one Google Ads DMA row matches ${membership.census_name || "this Census metro"}. None was selected.`
+    };
+  }
+  const city = membership.primary_city || "the Census metro's primary city";
+  const states = (membership.state_names || []).join(" or ") || "the metro's state";
   return {
-    dma: matchMetro(list, query),
-    state: matchAdmin(list, query)
+    outcome: "none",
+    reason: `This place is in ${membership.census_name || "a Census metro"} (CBSA ${membership.cbsa || "unknown"}), but no single Google Ads DMA Region is named ${city} in ${states}.`
+  };
+}
+
+function membershipSummary(info, dmaBasis, dmaSkipReason) {
+  return {
+    status: info.status,
+    reason: info.reason || null,
+    place_geoid: info.place_geoid || null,
+    counties: Array.isArray(info.counties) ? info.counties.slice() : [],
+    cbsa: info.cbsa || null,
+    census_name: info.census_name || null,
+    primary_city: info.primary_city || null,
+    dma_basis: dmaBasis,
+    dma_skip_reason: dmaSkipReason
+  };
+}
+
+// Namesake DMA: exactly one DMA Region named for this city in this state.
+// Containing DMA: the Google Ads DMA named for the Census CBSA the city's counties belong to.
+// An ambiguous or non-metro membership does not fall through to a namesake row.
+export function selectVolumeLocations(rows, query, membership) {
+  const list = Array.isArray(rows) ? rows : [];
+  const state = matchAdmin(list, query);
+  const namesake = matchMetro(list, query);
+  const info = membership || {
+    status: "missing",
+    reason: "Metro membership was not provided.",
+    primary_city_norm: null,
+    state_names: []
+  };
+  let dma = null;
+  let dmaBasis = null;
+  let dmaSkipReason = null;
+  if (info.status === "matched") {
+    const containing = matchDmaForMembership(list, query, info);
+    if (containing.outcome === "matched") {
+      if (namesake && namesake.location_code !== containing.match.location_code) {
+        dmaSkipReason = `The DMA named for this city (${namesake.location_name}) is not the DMA for ${info.census_name} (${containing.match.location_name}). Neither DMA was used.`;
+      } else {
+        dma = containing.match;
+        dmaBasis = namesake ? "namesake_and_census_cbsa" : "census_cbsa";
+      }
+    } else if (containing.outcome === "ambiguous") {
+      dmaSkipReason = containing.reason;
+    } else if (namesake && info.primary_city_norm === query.cityNorm) {
+      dma = namesake;
+      dmaBasis = "namesake";
+    } else {
+      dmaSkipReason = containing.reason;
+    }
+  } else if (info.status === "ambiguous" || info.status === "not_in_cbsa") {
+    dmaSkipReason = info.reason;
+  } else if (namesake) {
+    dma = namesake;
+    dmaBasis = "namesake";
+  } else {
+    dmaSkipReason = `No single DMA Region row is named for this city in this state. ${info.reason || "A containing metro was not assigned."}`;
+  }
+  return {
+    dma,
+    state,
+    dma_basis: dmaBasis,
+    dma_skip_reason: dmaSkipReason,
+    membership: membershipSummary(info, dmaBasis, dmaSkipReason)
   };
 }
 

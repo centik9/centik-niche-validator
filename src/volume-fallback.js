@@ -1,14 +1,17 @@
-import { loadExtractCatalog } from "./screen.js";
 import { createGeoIndex, matchCandidate } from "./geo-match.js";
-import { normalizePlace } from "./normalize.js";
+import { parseCensusMetroName, resolveMetroMembership } from "./metro-membership.js";
+import { normalizePlace, splitLocationName } from "./normalize.js";
+import { loadExtractCatalog } from "./screen.js";
 import { stateIdentity } from "./state-fips.js";
 import { normalizeState } from "./states.js";
 
 export const CITY_CORE_VOLUME_THRESHOLD = 10;
-export const FALLBACK_ESTIMATE_LABEL = "estimated from metro/state/Bing data, broader than the city";
+export const FALLBACK_ESTIMATE_LABEL = "estimated from metro/state data, broader than the city";
+export const BING_BROADER_ESTIMATE_LABEL = "estimated from Bing data, broader than the city";
 export const BING_CITY_ESTIMATE_LABEL = "estimated from Bing data, not measured Google Ads city volume";
+export const BING_CORROBORATION_NOTE = "Bing also shows demand.";
 
-export const ESTIMATE_METHOD_NOTE = "City estimate = round(broader clustered coverage volume × city occupied housing units / broader occupied housing units). Rounding is half away from zero. Occupied housing is the bundled 2023 ACS 5-year count: the Census place for the city, the sum of that state's counties for a state volume, and the Census metro whose title starts with this city for a namesake DMA. The extract has housing counts, not population, so this is an occupied-housing share, not a headcount. When more than one scaled estimate is positive, the city estimate is the minimum, so a larger geography cannot raise a smaller one. Bing volume at a Bing city location is not scaled. A fallback estimate is never written into the city search_volume field and is not a measured city volume.";
+export const ESTIMATE_METHOD_NOTE = "City estimate = round(broader clustered coverage volume × city occupied housing units / broader occupied housing units). Rounding is half away from zero. Occupied housing is the bundled 2023 ACS 5-year count: the Census place for the city, the sum of that state's counties for a state volume, and the Census CBSA that contains the place's counties for a DMA volume. When that county-to-CBSA mapping is missing, a namesake DMA uses the Census metro whose title starts with the city. The extract has housing counts, not population, so this is an occupied-housing share, not a headcount. Google Ads sets the value. A positive scaled metro estimate is kept because it is the geography the city belongs to. A positive state estimate does not lower it, and the state estimate is used only when no Google Ads metro estimate is positive. Within that one Google level, the minimum is used. Bing sets the value only when no Google Ads source has a positive scaled estimate, and then the minimum of the positive Bing estimates is used. Bing volume at a Bing city location is not scaled. When Bing has a positive clustered volume and Google Ads sets the value, Bing is corroboration only. A fallback estimate is never written into the city search_volume field and is not a measured city volume.";
 
 let housingCache = null;
 
@@ -59,14 +62,6 @@ function housingBundle() {
   return housingCache;
 }
 
-function parseMetro(name) {
-  const cleaned = String(name || "").replace(/\s+(metro|micro)\s+area$/i, "").trim();
-  const comma = cleaned.lastIndexOf(",");
-  const title = comma < 0 ? cleaned : cleaned.slice(0, comma);
-  const states = comma < 0 ? [] : cleaned.slice(comma + 1).toUpperCase().split(/[^A-Z]+/).filter((token) => token.length === 2);
-  return { first: normalizePlace(title.split("-")[0]), states };
-}
-
 function stateOccupied(extract, usps) {
   let occupied = 0;
   let counties = 0;
@@ -86,19 +81,33 @@ function metroOccupied(extract, city, state) {
   if (!identity) return null;
   const cityNorm = normalizePlace(city);
   const hits = [];
-  for (const row of Object.values(extract.metros || {})) {
-    const parsed = parseMetro(row.n);
-    if (parsed.first !== cityNorm) continue;
+  for (const [id, row] of Object.entries(extract.metros || {})) {
+    const parsed = parseCensusMetroName(row.n);
+    if (parsed.primary_norm !== cityNorm) continue;
     if (!parsed.states.includes(identity.usps)) continue;
-    hits.push(row);
+    hits.push({ id, row });
   }
   if (hits.length !== 1) return null;
-  const occupied = wholeCount(hits[0].occ);
+  const occupied = wholeCount(hits[0].row.occ);
   if (occupied === null) return null;
-  return { occupied, census_name: hits[0].n };
+  return { occupied, census_name: hits[0].row.n, cbsa: hits[0].id };
 }
 
-export function housingShareFor({ city, state, level }) {
+function metroShare(cityOccupied, metro) {
+  if (!metro || metro.occupied < cityOccupied) return null;
+  return {
+    status: "measured",
+    basis: "occupied_housing_units",
+    geography: "census_metro",
+    membership: metro.membership,
+    cbsa: metro.cbsa || null,
+    city_occupied: cityOccupied,
+    broader_occupied: metro.occupied,
+    census_name: metro.census_name
+  };
+}
+
+export function housingShareFor({ city, state, level, locationName, source }) {
   if (level !== "state" && level !== "metro") return null;
   const { extract, index } = housingBundle();
   const cityMatch = matchCandidate(index, { geography_type: "city", name: city, state });
@@ -118,16 +127,28 @@ export function housingShareFor({ city, state, level }) {
       census_name: place.n
     };
   }
-  const metro = metroOccupied(extract, city, state);
-  if (!metro || metro.occupied < cityOccupied) return null;
-  return {
-    status: "measured",
-    basis: "occupied_housing_units",
-    geography: "census_metro",
-    city_occupied: cityOccupied,
-    broader_occupied: metro.occupied,
-    census_name: metro.census_name
-  };
+  if (source === "bing") {
+    const named = splitLocationName(locationName).place || city;
+    const metro = metroOccupied(extract, named, state);
+    return metroShare(cityOccupied, metro && { ...metro, membership: "bing_location_namesake" });
+  }
+  const resolved = resolveMetroMembership({ city, state });
+  if (resolved.status === "matched") {
+    const row = extract.metros[resolved.cbsa];
+    const occupied = wholeCount(row && row.occ);
+    if (occupied === null) return null;
+    return metroShare(cityOccupied, {
+      occupied,
+      census_name: resolved.census_name,
+      cbsa: resolved.cbsa,
+      membership: "census_cbsa"
+    });
+  }
+  if (resolved.status === "missing") {
+    const metro = metroOccupied(extract, city, state);
+    return metroShare(cityOccupied, metro && { ...metro, membership: "namesake" });
+  }
+  return null;
 }
 
 function rawVolumes(attempts) {
@@ -152,10 +173,30 @@ function withheldEstimate(attempts) {
     measured_city_data: false,
     label: null,
     method: ESTIMATE_METHOD_NOTE,
+    value_source: null,
+    bing_used_for_value: false,
+    bing_note: null,
     winning_sources: [],
     raw_broader_volumes: rawVolumes(attempts),
     numeric_month_count: 0,
     note: "No broader source returned a clustered volume above 10 that could be scaled to a positive city estimate. Raw broader numbers are listed when a call was made. The grade was not invented from a null."
+  };
+}
+
+function bingShowsDemand(attempts) {
+  return attempts.some((attempt) => (
+    attempt.source === "bing"
+    && attempt.queried
+    && Number.isInteger(attempt.clustered_volume)
+    && attempt.clustered_volume > 0
+  ));
+}
+
+function lowestPositive(attempts) {
+  const value = Math.min(...attempts.map((attempt) => attempt.scaled_city_volume));
+  return {
+    value,
+    winners: attempts.filter((attempt) => attempt.scaled_city_volume === value)
   };
 }
 
@@ -185,10 +226,27 @@ export function buildVolumeEstimate(attempts, shareFor) {
     };
   });
   const candidates = decorated.filter((attempt) => attempt.candidate);
-  if (!candidates.length) return { attempts: decorated, estimate: withheldEstimate(decorated) };
-  const value = Math.min(...candidates.map((attempt) => attempt.scaled_city_volume));
-  const winners = candidates.filter((attempt) => attempt.scaled_city_volume === value);
-  const label = winners.some((attempt) => attempt.broader_than_city) ? FALLBACK_ESTIMATE_LABEL : BING_CITY_ESTIMATE_LABEL;
+  const googleMetro = candidates.filter((attempt) => attempt.source === "google_ads" && attempt.level === "metro");
+  const googleState = candidates.filter((attempt) => attempt.source === "google_ads" && attempt.level === "state");
+  const bing = candidates.filter((attempt) => attempt.source === "bing");
+  let selection = null;
+  let chosen = [];
+  if (googleMetro.length) {
+    selection = "google_ads_metro";
+    chosen = googleMetro;
+  } else if (googleState.length) {
+    selection = "google_ads_state";
+    chosen = googleState;
+  } else if (bing.length) {
+    selection = "bing_backup";
+    chosen = bing;
+  }
+  if (!selection) return { attempts: decorated, estimate: withheldEstimate(decorated) };
+  const { value, winners } = lowestPositive(chosen);
+  const label = selection === "bing_backup"
+    ? (winners.some((attempt) => attempt.broader_than_city) ? BING_BROADER_ESTIMATE_LABEL : BING_CITY_ESTIMATE_LABEL)
+    : FALLBACK_ESTIMATE_LABEL;
+  const bingNote = selection.startsWith("google_ads") && bingShowsDemand(decorated) ? BING_CORROBORATION_NOTE : null;
   return {
     attempts: decorated,
     estimate: {
@@ -197,6 +255,9 @@ export function buildVolumeEstimate(attempts, shareFor) {
       measured_city_data: false,
       label,
       method: ESTIMATE_METHOD_NOTE,
+      value_source: selection,
+      bing_used_for_value: selection === "bing_backup",
+      bing_note: bingNote,
       winning_sources: winners.map((attempt) => ({
         source: attempt.source,
         level: attempt.level,
@@ -207,7 +268,7 @@ export function buildVolumeEstimate(attempts, shareFor) {
       })),
       raw_broader_volumes: rawVolumes(decorated),
       numeric_month_count: Math.min(...winners.map((attempt) => attempt.numeric_month_count || 0)),
-      note: `${label}. ${ESTIMATE_METHOD_NOTE}`
+      note: [label, bingNote, ESTIMATE_METHOD_NOTE].filter(Boolean).join(" ")
     }
   };
 }
