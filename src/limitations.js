@@ -1,6 +1,7 @@
 export const STANDING_LIMITATIONS = [
   "Search volume is Google Ads' approximate average monthly searches via DataForSEO Keywords Data. It is not a count of customers.",
   "A null search volume means no data was returned. A null is not treated as zero demand, and it never produces a combined index.",
+  "When every packed city volume is null, or the clustered city total is at or below 10, the check may estimate a city volume from a namesake DMA, then the state, and from Bing Ads at the city or the nearest metro or state. The estimate is an occupied-housing share of the broader clustered volume. It is labeled estimated from metro/state/Bing data, broader than the city, and it is not a measured city volume. Raw broader numbers stay visible. If those fallbacks are blank or cannot be scaled, the grade stays withheld, or stays on the measured-zero cap when the city itself was a measured zero.",
   "A measured search volume of zero stays a measured zero. It can be reported only together with a non-empty measured Maps sample, and the displayed grade is capped at a clear fail. It is not missing data.",
   "CPC is the average Google Ads cost per click in USD. CPC is not revenue, not customer value, and not advertiser spend. This app does not multiply CPC by search volume.",
   "Google Ads competition and competition_index are paid-search advertiser competition, not local business competition.",

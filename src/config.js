@@ -33,6 +33,7 @@ export const EXAMPLE_BANNER = "Example data. Not a real market measurement. Numb
 export const LIVE_BANNER = "Live DataForSEO response. Maps results are a capped sample, not a census. Buyers are not verified. The index is a heuristic, not a valuation.";
 
 export const SEARCH_VOLUME_PATH = "/v3/keywords_data/google_ads/search_volume/live";
+export const BING_SEARCH_VOLUME_PATH = "/v3/keywords_data/bing/search_volume/live";
 export const MAPS_PATH = "/v3/serp/google/maps/live/advanced";
 export const ORGANIC_PATH = "/v3/serp/google/organic/live/advanced";
 export const TRENDS_PATH = "/v3/keywords_data/google_trends/explore/live";
@@ -52,4 +53,8 @@ export function mapsLocationsPath(iso) {
 
 export function trendsLocationsPath(iso) {
   return `/v3/keywords_data/google_trends/locations/${iso}`;
+}
+
+export function bingLocationsPath(iso) {
+  return `/v3/keywords_data/bing/locations/${iso}`;
 }

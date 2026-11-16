@@ -9,6 +9,7 @@ import {
   MAX_UPSTREAM_BYTES,
   ORGANIC_DEPTH,
   ORGANIC_PATH,
+  BING_SEARCH_VOLUME_PATH,
   SEARCH_VOLUME_PATH,
   TRENDS_PATH,
   UPSTREAM_TIMEOUT_MS,
@@ -18,8 +19,9 @@ import {
 import { MAX_PACKED_KEYWORDS } from "./volume-keywords.js";
 import { DataForSeoError } from "./errors.js";
 
-const LOCATION_GET = /^\/v3\/(?:keywords_data\/google_ads|keywords_data\/google_trends|serp\/google)\/locations\/[a-z]{2}$/;
+const LOCATION_GET = /^\/v3\/(?:keywords_data\/google_ads|keywords_data\/google_trends|keywords_data\/bing|serp\/google)\/locations\/[a-z]{2}$/;
 const VOLUME_FIELDS = new Set(["keywords", "location_code", "language_code", "search_partners"]);
+const BING_VOLUME_FIELDS = new Set(["keywords", "location_code", "language_code", "search_partners"]);
 const MAPS_FIELDS = new Set(["keyword", "location_code", "language_code", "depth", "device", "os", "search_this_area"]);
 const ORGANIC_FIELDS = new Set(["keyword", "location_code", "language_code", "depth", "device", "os"]);
 const TRENDS_FIELDS = new Set(["keywords", "location_code", "language_code", "type", "time_range", "item_types"]);
@@ -86,6 +88,28 @@ export function assertSafeRequest({ method, path, body }) {
     }
     const extra = Object.keys(task).filter((key) => !VOLUME_FIELDS.has(key));
     if (extra.length) refused(`Unexpected search volume fields: ${extra.join(",")}.`);
+    return;
+  }
+  if (method === "POST" && path === BING_SEARCH_VOLUME_PATH) {
+    const task = assertOneTask(body, "Bing search volume");
+    if (!Array.isArray(task.keywords) || task.keywords.length < 1 || task.keywords.length > MAX_PACKED_KEYWORDS) {
+      refused(`Bing search volume accepts 1 to ${MAX_PACKED_KEYWORDS} keywords in one task.`);
+    }
+    const seen = new Set();
+    for (const keyword of task.keywords) {
+      assertKeyword(keyword, "Keyword");
+      const key = keyword.trim().toLowerCase();
+      if (seen.has(key)) refused("Duplicate keywords are not allowed in one Bing search volume task.");
+      seen.add(key);
+    }
+    assertLocationCode(task);
+    if (task.language_code !== LANGUAGE_CODE) refused("language_code must be en.");
+    if (task.search_partners !== false) refused("search_partners must be false.");
+    if ("location_name" in task || "location_coordinate" in task || "date_from" in task || "date_to" in task || "language_name" in task) {
+      refused("Bing location_name, coordinates, language_name, and custom dates are not sent.");
+    }
+    const extra = Object.keys(task).filter((key) => !BING_VOLUME_FIELDS.has(key));
+    if (extra.length) refused(`Unexpected Bing search volume fields: ${extra.join(",")}.`);
     return;
   }
   if (method === "POST" && path === MAPS_PATH) {

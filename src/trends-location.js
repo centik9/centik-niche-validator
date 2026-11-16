@@ -81,9 +81,8 @@ function stateRegionsInclude(locationName, query) {
   return regionNorms.includes(query.stateNorm);
 }
 
-// City match only. Same state rule as selectTrendsLocation's city and metro
-// checks: a row whose region is a different state is not this market. Metro,
-// state, and country fallbacks are intentionally not used here.
+// City match only. A row whose region is a different state is not this market.
+// Metro, state, and country rows are not a city match.
 export function matchCityInState(rows, query) {
   const city = matchCity(Array.isArray(rows) ? rows : [], query);
   if (city.outcome === "matched" && city.match && !stateRegionsInclude(city.match.location_name, query)) {
@@ -112,24 +111,38 @@ export function matchCityInState(rows, query) {
   return city;
 }
 
+export function selectVolumeLocations(rows, query) {
+  const list = Array.isArray(rows) ? rows : [];
+  return {
+    dma: matchMetro(list, query),
+    state: matchAdmin(list, query)
+  };
+}
+
+// Bing has its own location list. Prefer the city, then one namesake metro, then the state.
+// A national Bing row is not used: a country volume is not scaled down to a city.
+export function selectBingVolumeLocation(rows, query) {
+  const list = Array.isArray(rows) ? rows : [];
+  const city = matchCityInState(list, query);
+  if (city.outcome === "matched" && city.match) {
+    return { level: "city", match: city.match, broader_than_city: false };
+  }
+  const metro = matchMetro(list, query);
+  if (metro) return { level: "metro", match: metro, broader_than_city: true };
+  const state = matchAdmin(list, query);
+  if (state) return { level: "state", match: state, broader_than_city: true };
+  return { level: "unavailable", match: null, broader_than_city: true };
+}
+
 export function selectTrendsLocation(rows, query) {
   const list = Array.isArray(rows) ? rows : [];
-  const city = matchCity(list, query);
-  if (city.outcome === "matched" && city.match) {
-    return {
-      level: "city",
-      match: city.match,
-      fallback_from_city: false,
-      note: "Google Trends series uses the confirmed city location."
-    };
-  }
   const metro = matchMetro(list, query);
   if (metro) {
     return {
       level: "metro",
       match: metro,
       fallback_from_city: true,
-      note: "No confirmed Google Trends city row. The series uses a metro or DMA location instead."
+      note: "Google Trends starts at the DMA or metro, not the city. The series is relative interest for that broader area."
     };
   }
   const state = matchAdmin(list, query);
@@ -138,7 +151,7 @@ export function selectTrendsLocation(rows, query) {
       level: "state",
       match: state,
       fallback_from_city: true,
-      note: "No confirmed Google Trends city or metro row. The series uses the state location instead."
+      note: "Google Trends starts at the DMA or state. No single DMA or metro row matched this city and state, so the series uses the state."
     };
   }
   const country = matchCountry(list, query);
@@ -147,13 +160,13 @@ export function selectTrendsLocation(rows, query) {
       level: "national",
       match: country,
       fallback_from_city: true,
-      note: "No confirmed Google Trends city, metro, or state row. The series uses the national location instead."
+      note: "Google Trends starts at the DMA or state. No DMA, metro, or state row matched, so the series uses the national location."
     };
   }
   return {
     level: "unavailable",
     match: null,
     fallback_from_city: true,
-    note: "Google Trends has no city, metro, state, or national row for this market. Trends was not requested."
+    note: "Google Trends has no DMA, metro, state, or national row for this market. Trends was not requested."
   };
 }

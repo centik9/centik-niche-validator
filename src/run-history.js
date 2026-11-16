@@ -99,7 +99,10 @@ export function snapshotFromValidation(report, extras) {
   const zone = calculated ? zoneFor(score.overall) : null;
   const market = report.city_market || {};
   const composite = report.live_composite;
-  const volume = measuredInteger(metric(report, "demand.search_volume"));
+  const fallback = report.demand && report.demand.volume_fallback && report.demand.volume_fallback.estimate;
+  const fallbackValue = fallback && fallback.status === "estimated" && Number.isInteger(fallback.value) ? fallback.value : null;
+  const demandEstimated = Boolean(report.city_market && report.city_market.demand_estimated) && fallbackValue !== null;
+  const volume = demandEstimated ? fallbackValue : measuredInteger(metric(report, "demand.search_volume"));
   const listings = measuredInteger(metric(report, "maps.deduplication.unique_organic_listings"));
   const location = report.location && report.location.google_ads;
   const parts = location && location.location_name ? location.location_name.split(",") : [];
@@ -115,17 +118,17 @@ export function snapshotFromValidation(report, extras) {
   });
   return {
     ...base,
-    market_score: numberField(calculated ? (example ? "example" : "measured") : "unavailable", calculated ? score.overall : null, example, example ? "Sample, not live" : "From last check"),
+    market_score: numberField(calculated ? (demandEstimated ? "estimated" : (example ? "example" : "measured")) : "unavailable", calculated ? score.overall : null, example || demandEstimated, demandEstimated ? fallback.label : (example ? "Sample, not live" : "From last check")),
     zone: wordsField(zone, "Market score zone. Not a lens verdict."),
-    demand: numberField(Number.isFinite(market.demand_index) ? "measured" : "unavailable", market.demand_index, example, example ? "Sample, not live" : "From last check"),
+    demand: numberField(Number.isFinite(market.demand_index) ? (demandEstimated ? "estimated" : "measured") : "unavailable", market.demand_index, example || demandEstimated, demandEstimated ? fallback.label : (example ? "Sample, not live" : "From last check")),
     competition: numberField(Number.isFinite(market.competition_index) ? "measured" : "unavailable", market.competition_index, false, "Maps competition index when it was measured."),
     margin: numberField(composite && Number.isFinite(composite.margin && composite.margin.index) ? "measured" : "unavailable", composite && composite.margin ? composite.margin.index : null, Boolean(composite && composite.estimated), "Margin index when a published price was on the check."),
     leads: rangeField("unavailable", null, null, true, "Lead range was not stored on the check."),
     revenue: rangeField("unavailable", null, null, true, "Revenue range was not stored on the check."),
     average_job: rangeField("unavailable", null, null, true, "Job price range was not stored on the check."),
-    volume: numberField(volume === null ? "unavailable" : (example ? "example" : "measured"), volume, example, example ? "Sample, not live" : "From last check search volume"),
+    volume: numberField(volume === null ? "unavailable" : (demandEstimated ? "estimated" : (example ? "example" : "measured")), volume, example || demandEstimated, demandEstimated ? fallback.label : (example ? "Sample, not live" : "From last check search volume")),
     map_pack: numberField(listings === null ? "unavailable" : (example ? "example" : "measured"), listings, example, example ? "Sample, not live" : "Maps sample listings. Not an exhaustive pack."),
-    grade: numberField(calculated ? (example ? "example" : "measured") : "unavailable", calculated ? score.overall : null, example, "Market score. Not a classroom or four-yes grade.")
+    grade: numberField(calculated ? (demandEstimated ? "estimated" : (example ? "example" : "measured")) : "unavailable", calculated ? score.overall : null, example || demandEstimated, demandEstimated ? fallback.label : "Market score. Not a classroom or four-yes grade.")
   };
 }
 

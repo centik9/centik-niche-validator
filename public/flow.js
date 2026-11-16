@@ -542,7 +542,7 @@ function renderGate() {
   const slot = $("deep-slot");
   slot.replaceChildren();
   slot.append(el("p", { class: "notice" }, [liveReady
-    ? "Live mode is on. This check is $0.105: $0.09 for Google Ads search volume, $0.002 for Maps depth 100, $0.002 for organic depth 10, and $0.011 for Google Trends. A saved result for the same niche and city is not charged again until you rerun the paid check."
+    ? "Live mode is on. The confirm step reserves the worst case, $0.375: the $0.105 city check (Google Ads $0.09, Maps depth 100 $0.002, organic $0.002, Trends $0.011) plus a DMA volume call, a state volume call, and a Bing volume call at $0.09 each. Those three run only if city Google Ads volume is blank or near zero. A saved result for the same niche and city is not charged again until you rerun the paid check."
     : "Paid DataForSEO check is off. Yes did not authorize spending."]));
   slot.append(el("p", {}, [gate.reason]));
   if (!gate.example_check_available) {
@@ -616,7 +616,11 @@ async function runExampleCheck() {
       result.append(el("p", {}, [score && score.withheld_reason ? score.withheld_reason : "No combined index."]));
     } else {
       result.append(el("p", { class: "score-number" }, [score.overall_display]));
-      result.append(el("p", {}, [report.city_market && report.city_market.live ? "Live Google data. Not a recommendation." : "Example data. Not a recommendation."]));
+      result.append(el("p", {}, [
+        score.grade_state === "estimated"
+          ? `${score.demand_estimate_label || "estimated from metro/state/Bing data, broader than the city"}. Not a measured city volume and not a recommendation.`
+          : (report.city_market && report.city_market.live ? "Live Google data. Not a recommendation." : "Example data. Not a recommendation.")
+      ]));
     }
     result.append(el("p", {}, [
       `Keyword sent: ${report.niche}. City: ${report.normalized_query.city}, ${report.normalized_query.state}.`

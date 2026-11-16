@@ -8,7 +8,7 @@ import { formatDataStamp } from "../src/data-stamp.js";
 import { createExampleTransport } from "../src/example-transport.js";
 import { createLocationDirectory } from "../src/locations.js";
 import { createFileResultStore, selectStoredResult } from "../src/result-store.js";
-import { bindSpendRequest, createSpendGate, QUERY_COST_USD, resultIdentity } from "../src/spend.js";
+import { bindSpendRequest, createSpendGate, WORST_CASE_QUERY_COST_USD, resultIdentity } from "../src/spend.js";
 import { confirmedFrom, postJson, TEST_AUTH, withServer } from "./helpers.js";
 
 const NOW = Date.parse("2026-11-07T20:00:00.000Z");
@@ -94,7 +94,7 @@ test("a saved result survives a new gate and is not billed again after a day", a
   assert.equal(quoted.cache_hit, true);
   assert.equal(quoted.estimated_cost_usd, 0);
   assert.equal(quoted.cached_report.captured_at, saved.captured_at);
-  assert.equal(quoted.rerun_estimated_cost_usd, QUERY_COST_USD);
+  assert.equal(quoted.rerun_estimated_cost_usd, WORST_CASE_QUERY_COST_USD);
 
   const restarted = createSpendGate({
     resultStorePath: file,
@@ -108,12 +108,12 @@ test("a saved result survives a new gate and is not billed again after a day", a
   assert.equal(again.captured_at, saved.captured_at);
   const rerun = await restarted.quote(EMAIL, prepared, { rerun: true });
   assert.equal(rerun.cache_hit, false);
-  assert.equal(rerun.estimated_cost_usd, QUERY_COST_USD);
-  assert.equal(rerun.calls.length, 4);
+  assert.equal(rerun.estimated_cost_usd, WORST_CASE_QUERY_COST_USD);
+  assert.equal(rerun.calls.length, 7);
   const accepted = await restarted.accept(rerun.spend_token, EMAIL, prepared, { rerun: true });
   assert.equal(accepted.ok, true);
   assert.equal(accepted.cache_hit, false);
-  assert.equal(accepted.estimated_cost_usd, QUERY_COST_USD);
+  assert.equal(accepted.estimated_cost_usd, WORST_CASE_QUERY_COST_USD);
   const normal = await restarted.quote(EMAIL, prepared);
   const mismatch = await restarted.accept(normal.spend_token, EMAIL, prepared, { rerun: true });
   assert.equal(mismatch.ok, false);
@@ -149,7 +149,7 @@ test("the file store ignores a shallow result and serves a deeper one at $0", as
     readAccountSpent: async () => 0
   });
   assert.equal(await shallowGate.freshResult(bind), null);
-  assert.equal((await shallowGate.quote(EMAIL, prepared)).estimated_cost_usd, QUERY_COST_USD);
+  assert.equal((await shallowGate.quote(EMAIL, prepared)).estimated_cost_usd, WORST_CASE_QUERY_COST_USD);
   await store.save(record(bind, 200, "2026-11-03T18:00:00.000Z", "deep"));
   const deep = await shallowGate.freshResult(bind);
   assert.equal(deep.marker, "deep");
@@ -208,7 +208,7 @@ test("a restarted server quotes a durable hit at $0 and a rerun is a new paid ch
     };
     const quoted = await (await postJson(port, "/api/quote", payload)).json();
     assert.equal(quoted.cache_hit, false);
-    assert.equal(quoted.estimated_cost_usd, QUERY_COST_USD);
+    assert.equal(quoted.estimated_cost_usd, WORST_CASE_QUERY_COST_USD);
     const first = await (await postJson(port, "/api/validate", { ...payload, spend_token: quoted.spend_token })).json();
     firstCaptured = first.captured_at;
     assert.equal(firstCaptured, new Date(NOW).toISOString());
@@ -239,8 +239,8 @@ test("a restarted server quotes a durable hit at $0 and a rerun is a new paid ch
 
     const rerunQuote = await (await postJson(port, "/api/quote", { ...payload, rerun: true })).json();
     assert.equal(rerunQuote.cache_hit, false);
-    assert.equal(rerunQuote.estimated_cost_usd, QUERY_COST_USD);
-    assert.equal(rerunQuote.calls.length, 4);
+    assert.equal(rerunQuote.estimated_cost_usd, WORST_CASE_QUERY_COST_USD);
+    assert.equal(rerunQuote.calls.length, 7);
     const rerun = await (await postJson(port, "/api/validate", {
       ...payload,
       rerun: true,

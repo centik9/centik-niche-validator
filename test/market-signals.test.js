@@ -141,12 +141,15 @@ test("Trends seasonality is relative interest and missing data is not zero", () 
   assert.equal(missing.penalizes_seasonal_niches, false);
 });
 
-test("Trends location falls back from city to metro, state, then national", () => {
+test("Trends starts at metro or state, not the city", () => {
   const query = { cityNorm: "austin", stateNorm: "texas", countryIso: "us", codeSource: "test" };
   const state = { location_code: 2, location_name: "Texas,United States", location_code_parent: 1, country_iso_code: "US", location_type: "State" };
   const country = { location_code: 1, location_name: "United States", location_code_parent: null, country_iso_code: "US", location_type: "Country" };
   const metro = { location_code: 8, location_name: "Austin,Texas,United States", location_code_parent: 2, country_iso_code: "US", location_type: "DMA Region" };
+  const city = { location_code: 9, location_name: "Austin,Texas,United States", location_code_parent: 2, country_iso_code: "US", location_type: "City" };
+  assert.equal(selectTrendsLocation([country, state, city, metro], query).level, "metro");
   assert.equal(selectTrendsLocation([country, state, metro], query).level, "metro");
+  assert.equal(selectTrendsLocation([country, state, city], query).level, "state");
   assert.equal(selectTrendsLocation([country, state], query).level, "state");
   assert.equal(selectTrendsLocation([country], query).level, "national");
   assert.equal(selectTrendsLocation([], query).level, "unavailable");
@@ -164,7 +167,7 @@ test("the result cache key cannot replay a volume-only or depth-20 check", async
     }
   });
   const key = resultCacheKey(bind);
-  assert.match(key, /microsite-v2/);
+  assert.match(key, /microsite-v3/);
   assert.match(key, /maps100/);
   assert.match(key, /organic10/);
   assert.match(key, /trends-explore-12m/);
@@ -209,7 +212,7 @@ test("an organic failure does not withhold a measured volume and Maps check", as
   assert.equal(report.organic.status, "failed");
   assert.equal(report.score.overall_display, "79.6");
   assert.equal(report.maps.requested_depth, 100);
-  assert.equal(report.trends.geo.level, "city");
+  assert.equal(report.trends.geo.level, "state");
   assert.equal(report.city_market.organic_used_in_competition_index, false);
   assert.notEqual(report.requests.some((item) => item.endpoint === `POST ${TRENDS_PATH}`), false);
 });

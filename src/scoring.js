@@ -1,4 +1,5 @@
 import { isMeasuredStatus } from "./measurement.js";
+import { usableFallbackEstimate } from "./volume-fallback.js";
 
 export const MODEL_ID = "centik-heuristic-v1";
 export const DEMAND_WEIGHT_PERCENT = 65;
@@ -18,7 +19,7 @@ export const DEMAND_BANDS = [
 ];
 
 export const FORMULA = {
-  demand_index: "Select the inclusive band containing clustered coverage volume, the sum of each cluster's maximum measured monthly searches. Word-order and stopword twins count once. The core term volume is reported separately and is not this input. Missing clusters are omitted, not added as zero. The highest band index is 90, not 100.",
+  demand_index: "Select the inclusive band containing clustered coverage volume, the sum of each cluster's maximum measured monthly searches. Word-order and stopword twins count once. The core term volume is reported separately and is not this input. Missing clusters are omitted, not added as zero. The highest band index is 90, not 100. When city volume is null or the clustered total is at or below 10, a positive scaled DMA, state, or Bing estimate can be this input instead. That estimate is not a measured city volume.",
   sample_openness: "100 - (100 * min(unique_organic_listings, requested_depth) / requested_depth). requested_depth is 100.",
   overall: "round_half_up((65 * demand_index + 35 * sample_openness) / 10) / 10. Calculated only when both inputs are measured numbers and unique organic listings is greater than zero. When the demand input is a measured zero and that result is 15.0 or higher, the displayed grade is capped at 14.9 so it stays a clear fail. Missing, failed, empty, and unusable demand stay withheld as insufficient data and are not shown as zero.",
   rounding: "The tenth is rounded half away from zero with integer arithmetic, so binary floating point does not decide it.",
@@ -110,12 +111,15 @@ function indexSource(demand) {
 
 function usableVolume(volume) {
   if (!volume || !Number.isInteger(volume.value)) return false;
-  if (volume.status === "measured" || volume.status === "measured_zero") return true;
+  if (volume.status === "measured" || volume.status === "measured_zero" || volume.status === "estimated") return true;
   return volume.status === "partial" && volume.value > 0;
 }
 
 export function buildScore({ demand, maps, origin }) {
-  const source = indexSource(demand);
+  const estimate = usableFallbackEstimate(demand);
+  const source = estimate
+    ? { volume: { status: "estimated", value: estimate.value }, name: "volume_fallback_estimate" }
+    : indexSource(demand);
   const volume = source.volume;
   const core = demand.search_volume;
   const unique = maps.deduplication.unique_organic_listings;
@@ -136,7 +140,7 @@ export function buildScore({ demand, maps, origin }) {
     openness = sampleOpenness(unique.value, depth);
   }
 
-  const measuredZeroDemand = Boolean(volume && volume.status === "measured_zero");
+  const measuredZeroDemand = !estimate && Boolean(volume && volume.status === "measured_zero");
   const flags = [];
   if (origin === "example") flags.push("example_data");
   if (measuredZeroDemand) flags.push("measured_zero_demand");
@@ -144,6 +148,7 @@ export function buildScore({ demand, maps, origin }) {
   if (uniqueMeasured && unique.value === 0) flags.push("maps_sample_empty");
   if (uniqueMeasured && unique.value > 0 && unique.value < depth / 2) flags.push("maps_sample_sparse");
   if (uniqueMeasured && unique.value >= depth) flags.push("maps_sample_saturated");
+  if (estimate) flags.push("demand_estimated");
   if (demand.spell && demand.spell.status === "corrected") flags.push("spell_corrected");
   if (maps.se_results_count && maps.se_results_count.status === "inconsistent") flags.push("se_results_count_inconsistent");
   if (maps.address_flags && maps.address_flags.listings_with_different_address_city > 0) {
@@ -198,12 +203,12 @@ export function buildScore({ demand, maps, origin }) {
 
   const gradeState = overallStatus !== "calculated"
     ? (volumeMeasured ? "withheld" : "insufficient_data")
-    : (gradeCap.applied ? "capped_fail" : "calculated");
+    : (estimate ? "estimated" : (gradeCap.applied ? "capped_fail" : "calculated"));
 
   if (overallStatus === "withheld") flags.push("combined_index_withheld");
 
   const required = [
-    { id: "demand.search_volume", measured: volumeMeasured },
+    { id: estimate ? "demand.volume_fallback.estimate" : "demand.search_volume", measured: volumeMeasured },
     { id: "maps.unique_organic_listings", measured: uniqueMeasured }
   ];
   const measuredCount = required.filter((item) => item.measured).length;
@@ -213,8 +218,8 @@ export function buildScore({ demand, maps, origin }) {
     return type === "city" || type === "municipality";
   };
   const adjustments = confidenceAdjustments({
-    numericMonths: demand.monthly_searches ? demand.monthly_searches.numeric_month_count : 0,
-    bothCityLike: cityLike(demand.location) && cityLike(maps.location),
+    numericMonths: estimate ? estimate.numeric_month_count || 0 : (demand.monthly_searches ? demand.monthly_searches.numeric_month_count : 0),
+    bothCityLike: !estimate && cityLike(demand.location) && cityLike(maps.location),
     saturated: uniqueMeasured && unique.value >= depth,
     spellCorrected: Boolean(demand.spell && demand.spell.status === "corrected")
   });
@@ -241,10 +246,15 @@ export function buildScore({ demand, maps, origin }) {
     interpretation.push("No combined index was produced.");
     interpretation.push(withheldReason);
   } else {
-    interpretation.push(gradeCap.applied
-      ? `The displayed grade is ${overall.display} because measured zero demand is capped at a clear fail. The uncapped formula result was ${gradeCap.uncapped_display}. It is not a recommendation to enter a market.`
-      : `The combined index is ${overall.display}. It is not a recommendation to enter a market.`);
+    interpretation.push(estimate
+      ? `The combined index is ${overall.display}. Demand is ${estimate.label}. It is not a measured city volume and it is not a recommendation to enter a market.`
+      : (gradeCap.applied
+        ? `The displayed grade is ${overall.display} because measured zero demand is capped at a clear fail. The uncapped formula result was ${gradeCap.uncapped_display}. It is not a recommendation to enter a market.`
+        : `The combined index is ${overall.display}. It is not a recommendation to enter a market.`));
     interpretation.push(`Demand band "${matchedBand.label}" from ${source.name} ${volume.value} contributes weight 0.65 as demand index ${demandIndex}.`);
+    if (estimate) {
+      interpretation.push(estimate.note);
+    }
     if (source.name === "clustered_coverage_volume") {
       interpretation.push("The demand index uses clustered coverage volume. The core term volume is separate. Word-order twins are not summed twice, and a missing phrase is not zero.");
     }
@@ -278,6 +288,9 @@ export function buildScore({ demand, maps, origin }) {
       search_volume_status: core ? core.status : volume.status,
       clustered_coverage_volume: source.name === "clustered_coverage_volume" && Number.isInteger(volume.value) ? volume.value : null,
       clustered_coverage_status: source.name === "clustered_coverage_volume" ? volume.status : null,
+      estimated_city_volume: estimate ? estimate.value : null,
+      demand_estimated: Boolean(estimate),
+      demand_estimate_label: estimate ? estimate.label : null,
       demand_index_input: source.name,
       unique_organic_listings: uniqueMeasured ? unique.value : null,
       unique_organic_listings_status: unique.status,
