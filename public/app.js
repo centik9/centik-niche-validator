@@ -21,6 +21,7 @@ const STATUS_LABELS = {
   inconsistent: "Inconsistent",
   not_requested: "Not requested",
   partial: "Partial",
+  estimated: "Estimated",
   none: "None",
   corrected: "Spell-corrected"
 };
@@ -234,6 +235,7 @@ function shownValue(field) {
   }
   if (field.status === "failed") return "Failed";
   if (field.status === "measured_zero") return "0 (measured)";
+  if (field.status === "estimated") return `${field.value} (estimated)`;
   if (field.status === "partial") return `${field.value} (partial)`;
   return String(field.value);
 }
@@ -276,7 +278,11 @@ function renderReport() {
 
   const score = report.score;
   const scoreBlock = el("div", {}, [el("h3", {}, ["Combined heuristic index"])]);
-  if (score && score.grade_state === "insufficient_data") {
+  if (score && score.grade_state === "estimated") {
+    scoreBlock.append(el("p", { class: "score-number" }, [`${score.overall_display} (estimated)`]));
+    scoreBlock.append(el("p", {}, [score.demand_estimate_label || "estimated from metro/state data, broader than the city"]));
+    scoreBlock.append(el("p", {}, ["This grade uses a fallback estimate. It is not a measured city volume."]));
+  } else if (score && score.grade_state === "insufficient_data") {
     scoreBlock.append(el("p", { class: "score-withheld" }, ["Insufficient data"]));
     scoreBlock.append(el("p", {}, [score.withheld_reason || "Demand was not measured. This is not a score of 0."]));
   } else if (!score || score.overall_status !== "calculated" || score.overall_display === null) {
@@ -322,6 +328,24 @@ function renderReport() {
     root.append(el("p", {}, [`Monthly arithmetic mean ${report.demand.monthly_crosscheck.arithmetic_mean} differs from search_volume. The index still uses search_volume.`]));
   }
   if (report.demand.error && report.demand.error.message) root.append(el("p", { class: "error" }, [report.demand.error.message]));
+  const fallback = report.demand.volume_fallback;
+  if (fallback && fallback.triggered) {
+    const estimate = fallback.estimate || {};
+    root.append(el("h3", {}, ["Broader volume estimate"]));
+    if (estimate.status === "estimated") {
+      root.append(el("p", {}, [`${estimate.value} (estimated). ${estimate.label}`]));
+      root.append(el("p", { class: "muted" }, ["This is not a measured city volume. The city Google Ads figures above are unchanged."]));
+    } else {
+      root.append(el("p", {}, ["Broader sources were checked and did not produce a city estimate. The grade was not filled in from a null."]));
+    }
+    (estimate.raw_broader_volumes || []).forEach((row) => {
+      const raw = row.clustered_volume == null ? "null" : String(row.clustered_volume);
+      const scaled = row.scaled_city_volume == null ? "not scaled" : String(row.scaled_city_volume);
+      const share = row.share && row.share.city_occupied ? `, occupied housing ${row.share.city_occupied}/${row.share.broader_occupied}` : "";
+      root.append(el("p", {}, [`${row.source} ${row.level} ${row.location_name || ""}: raw clustered volume ${raw}, scaled city estimate ${scaled}${share}.`]));
+    });
+    if (estimate.note) root.append(el("p", { class: "muted" }, [estimate.note]));
+  }
   if (report.demand.clustered_coverage_volume) {
     root.append(metric("Clustered coverage volume (demand index input)", report.demand.clustered_coverage_volume));
     root.append(el("p", { class: "muted" }, [report.demand.clustered_coverage_volume.note || "The demand index uses clustered coverage volume. The core term above is separate."]));

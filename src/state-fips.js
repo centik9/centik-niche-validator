@@ -52,8 +52,14 @@ const BY_NAME = {
   wyoming: ["56", "WY"]
 };
 
+const BY_USPS = new Map(Object.entries(BY_NAME).map(([name, [fips, usps]]) => [usps, { fips, usps, name }]));
+
 export function stateIdentity(normalizedName) {
   const hit = BY_NAME[normalizedName];
   if (!hit) return null;
   return { fips: hit[0], usps: hit[1], name: normalizedName };
+}
+
+export function stateByUsps(usps) {
+  return BY_USPS.get(String(usps || "").toUpperCase()) || null;
 }

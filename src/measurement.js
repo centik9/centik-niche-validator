@@ -28,6 +28,7 @@ export function labelDemand(metric) {
   }
   if (metric.status === "failed") return "Failed";
   if (metric.status === "measured_zero") return "0 (measured)";
+  if (metric.status === "estimated") return `${metric.value} (estimated)`;
   if (metric.status === "partial") return `${metric.value} (partial)`;
   return String(metric.value);
 }

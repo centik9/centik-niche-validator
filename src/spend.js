@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { KEYWORD_IDEAS_PATH, MAPS_PATH, ORGANIC_PATH, SEARCH_VOLUME_PATH, TRENDS_PATH } from "./config.js";
+import { BING_SEARCH_VOLUME_PATH, KEYWORD_IDEAS_PATH, MAPS_PATH, ORGANIC_PATH, SEARCH_VOLUME_PATH, TRENDS_PATH } from "./config.js";
 import { openResultStore } from "./result-store.js";
 import { VOLUME_KEYWORD_SET_ID } from "./volume-keywords.js";
 
@@ -10,6 +10,7 @@ export const MAPS_COST_USD = 0.002;
 export const ORGANIC_COST_USD = 0.002;
 export const TRENDS_COST_USD = 0.011;
 export const QUERY_COST_USD = 0.105;
+export const BING_VOLUME_COST_USD = 0.09;
 export const KEYWORD_IDEAS_TASK_USD = 0.012;
 export const KEYWORD_IDEAS_ITEM_USD = 0.00012;
 // Labs bills $0.012 + $0.00012 per returned item. Forty items cost $0.0168.
@@ -17,7 +18,7 @@ export const KEYWORD_IDEAS_ITEM_USD = 0.00012;
 export const KEYWORD_IDEAS_COST_USD = 0.017;
 export const MAPS_LIVE_DEPTH = 100;
 export const ORGANIC_LIVE_DEPTH = 10;
-export const RESULT_CACHE_VERSION = "microsite-v2";
+export const RESULT_CACHE_VERSION = "microsite-v4";
 export const TOKEN_MS = 5 * 60 * 1000;
 const TRENDS_CACHE_ID = "trends-explore-12m";
 const SCALE = 1000;
@@ -79,6 +80,42 @@ export function paidCalls() {
     }
   ];
 }
+
+export function fallbackPaidCalls() {
+  return [
+    {
+      method: "POST",
+      path: SEARCH_VOLUME_PATH,
+      purpose: "Google Ads search volume live, DMA fallback, only if city volume is blank or near zero",
+      conditional: true,
+      estimated_cost_usd: ADS_COST_USD
+    },
+    {
+      method: "POST",
+      path: SEARCH_VOLUME_PATH,
+      purpose: "Google Ads search volume live, state fallback, only if city and DMA volume are blank or near zero",
+      conditional: true,
+      estimated_cost_usd: ADS_COST_USD
+    },
+    {
+      method: "POST",
+      path: BING_SEARCH_VOLUME_PATH,
+      purpose: "Bing Ads search volume live, city or nearest location, only if city Google Ads volume is blank or near zero",
+      conditional: true,
+      estimated_cost_usd: BING_VOLUME_COST_USD
+    }
+  ];
+}
+
+export function quotedPaidCalls() {
+  return [...paidCalls(), ...fallbackPaidCalls()];
+}
+
+function sumCallCost(calls) {
+  return dollars(calls.reduce((sum, call) => sum + milli(call.estimated_cost_usd), 0));
+}
+
+export const WORST_CASE_QUERY_COST_USD = sumCallCost(quotedPaidCalls());
 
 export function bindSpendRequest(email, prepared, flags = {}) {
   const ads = prepared.confirmed && prepared.confirmed.google_ads;
@@ -187,7 +224,9 @@ export function createSpendGate(options = {}) {
       cap_usd: dollars(capUnits),
       remaining_usd: dollars(Math.max(0, capUnits - spentUnits())),
       query_cost_usd: QUERY_COST_USD,
+      worst_case_query_cost_usd: WORST_CASE_QUERY_COST_USD,
       ads_cost_usd: ADS_COST_USD,
+      bing_volume_cost_usd: BING_VOLUME_COST_USD,
       maps_cost_usd: MAPS_COST_USD,
       organic_cost_usd: ORGANIC_COST_USD,
       trends_cost_usd: TRENDS_COST_USD,
@@ -281,19 +320,24 @@ export function createSpendGate(options = {}) {
     }
     const bind = bindSpendRequest(email, prepared, { rerun: flags.rerun === true });
     const hit = bind.rerun ? null : await freshResult(bind);
-    const cost = hit ? 0 : QUERY_COST_USD;
+    const cost = hit ? 0 : WORST_CASE_QUERY_COST_USD;
     const account = flags.requireAccount ? await accountPosition(cost) : null;
     const signed = signToken(bind);
     const state = totals();
+    const calls = quotedPaidCalls();
     return {
-      calls: hit ? [] : paidCalls(),
+      calls: hit ? [] : calls,
+      base_calls: paidCalls(),
+      fallback_calls: fallbackPaidCalls(),
+      base_estimated_cost_usd: QUERY_COST_USD,
+      worst_case_cost_usd: WORST_CASE_QUERY_COST_USD,
       cache_hit: Boolean(hit),
       rerun: bind.rerun,
       captured_at: hit ? hit.captured_at : null,
       maps_depth: hit ? hit.maps_depth : null,
       cached_report: hit,
-      rerun_estimated_cost_usd: QUERY_COST_USD,
-      rerun_calls: paidCalls(),
+      rerun_estimated_cost_usd: WORST_CASE_QUERY_COST_USD,
+      rerun_calls: calls,
       estimated_cost_usd: cost,
       spent_usd: account ? account.spent_usd : state.spent_usd,
       remaining_usd: account ? account.remaining_usd : state.remaining_usd,
@@ -320,7 +364,7 @@ export function createSpendGate(options = {}) {
       nonce: parsed.body.nonce,
       cache_hit: Boolean(hit),
       rerun: bind.rerun,
-      estimated_cost_usd: hit ? 0 : QUERY_COST_USD
+      estimated_cost_usd: hit ? 0 : WORST_CASE_QUERY_COST_USD
     };
   }
 
@@ -451,6 +495,11 @@ export function createSpendGate(options = {}) {
     ];
     if (report.organic && report.organic.sent_to_dataforseo) calls.push(callEntry(`POST ${ORGANIC_PATH}`, report.organic, ORGANIC_COST_USD));
     if (report.trends && report.trends.sent_to_dataforseo) calls.push(callEntry(`POST ${TRENDS_PATH}`, report.trends, TRENDS_COST_USD));
+    const attempts = report.demand && report.demand.volume_fallback && report.demand.volume_fallback.attempts;
+    for (const attempt of Array.isArray(attempts) ? attempts : []) {
+      if (!attempt || !attempt.sent_to_dataforseo) continue;
+      calls.push(callEntry(attempt.endpoint, attempt, attempt.estimated_cost_usd || ADS_COST_USD));
+    }
     const cost = dollars(calls.reduce((sum, call) => sum + milli(call.cost_usd), 0));
     entries.push({
       at: new Date(now()).toISOString(),

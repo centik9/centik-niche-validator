@@ -75,7 +75,7 @@ test("confirmation uses the product-specific code, ignoring a client country cod
   assert.equal(report.demand.keyword_rows.length, volume.body[0].keywords.length);
   assert.equal(report.organic.directory_counts.top10_results, 10);
   assert.equal(report.trends.seasonality.level, "low");
-  assert.equal(report.trends.geo.level, "city");
+  assert.equal(report.trends.geo.level, "state");
   assert.equal(report.normalized_query.state_normalized, "texas");
   assert.equal(report.generated_at, "2026-01-15T00:00:00.000Z");
 });

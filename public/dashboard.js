@@ -65,6 +65,7 @@ function metricText(metric) {
   }
   if (metric.status === "failed") return "Failed";
   if (metric.status === "measured_zero") return "0 (measured)";
+  if (metric.status === "estimated") return `${metric.value} (estimated)`;
   if (metric.status === "partial") return `${metric.value} (partial)`;
   return String(metric.value);
 }
@@ -634,6 +635,9 @@ function renderGauge(composite, title, note) {
   $("chipwrap").replaceChildren(insufficient
     ? el("span", { class: "chip" }, ["Insufficient data"])
     : (zone ? el("span", { class: "chip", style: `color:${zoneColor(zone)}` }, [zone.name]) : ""));
+  if (!insufficient && composite && (composite.demand_estimated || composite.grade_state === "estimated")) {
+    $("chipwrap").append(el("span", { class: "chip" }, ["estimated"]));
+  }
   const capNote = composite && composite.grade_cap && composite.grade_cap.applied ? composite.grade_cap.note : "";
   $("verdict").textContent = insufficient
     ? (measuredCheckNeeded
@@ -1291,8 +1295,11 @@ function renderQuote(quote, proposal) {
   $("pay-cancel").hidden = !showCancel;
   $("pay-cancel").disabled = !showCancel || state.busy;
   $("paid-warn").hidden = stored && !state.rerunArmed;
+  const worstCaseNote = chargeCalls.some((call) => call.conditional)
+    ? " This total is the worst case. The DMA, state, and Bing volume calls run only if city Google Ads volume is blank or near zero."
+    : "";
   const breakdown = chargeCalls.length
-    ? `${chargeCalls.map((call) => `${call.purpose} ${quoteMoney(call.estimated_cost_usd)}`).join(". ")}. Total ${quoteMoney(chargeCost)}. Location lists are free and are not in this cost.`
+    ? `${chargeCalls.map((call) => `${call.purpose} ${quoteMoney(call.estimated_cost_usd)}`).join(". ")}. Total ${quoteMoney(chargeCost)}. Location lists are free and are not in this cost.${worstCaseNote}`
     : "";
   $("paid-note").textContent = locked
     ? "Hard stop. Step 4 stays locked."
@@ -1352,12 +1359,16 @@ function renderResults(message, report) {
     const volume = report.demand && report.demand.search_volume;
     const listings = report.city_market && report.city_market.unique_listings;
     const cpc = report.demand && report.demand.cpc;
-    searches = real || volume ? metricText(volume) : "-";
+    const estimate = report.demand && report.demand.volume_fallback && report.demand.volume_fallback.estimate;
+    searches = estimate && estimate.status === "estimated"
+      ? `${estimate.value} (estimated)`
+      : (real || volume ? metricText(volume) : "-");
     if (Number.isFinite(listings)) rivals = listings === 0 ? "0 (measured)" : String(listings);
     else if (real) rivals = "Insufficient data";
     bid = real || cpc ? moneyText(cpc) : "-";
     $("res-pill").textContent = real ? "Live Google data" : "Sample data";
-    if (real && volume && volume.status === "measured_zero") searchesCaption = "Measured zero, not missing.";
+    if (estimate && estimate.status === "estimated") searchesCaption = estimate.label || "estimated from metro/state data, broader than the city";
+    else if (real && volume && volume.status === "measured_zero") searchesCaption = "Measured zero, not missing.";
     else if (real && (!volume || volume.value == null || volume.status === "missing" || volume.status === "failed" || volume.status === "unusable")) searchesCaption = "Source returned nothing.";
   } else {
     const composite = state.location && state.proposal && state.proposal.composite;
@@ -1369,7 +1380,8 @@ function renderResults(message, report) {
   }
   const insufficient = !real && Boolean(state.proposal && state.proposal.insufficient_data);
   const caption = real ? "From last check." : insufficient ? "Insufficient data. A measured check is needed." : "Sample, not live";
-  slot.append(resTile("Monthly searches", searches, real ? searchesCaption : caption, RES_SPARKS.searches, false));
+  const searchesEstimated = typeof searches === "string" && searches.endsWith("(estimated)");
+  slot.append(resTile("Monthly searches", searches, real ? searchesCaption : caption, RES_SPARKS.searches, searchesEstimated));
   slot.append(resTile("Map pack rivals", rivals, caption, RES_SPARKS.rivals, false));
   slot.append(resTile("Top ad bid", bid, bid === "Insufficient data" || bid === "$0.00 (measured)" ? searchesCaption : caption, RES_SPARKS.bid, true));
   if (message) slot.append(el("p", { class: message.toLowerCase().includes("not") ? "error res-note" : "help res-note" }, [message]));
@@ -1385,6 +1397,10 @@ function renderDetails(report) {
   if (!has) return;
   $("details-pill").textContent = realCheck(report) ? "From last check" : "Sample data";
   const notes = [report.live_banner, report.example_banner].filter(Boolean);
+  const estimateNote = report.demand && report.demand.volume_fallback && report.demand.volume_fallback.estimate;
+  if (estimateNote && estimateNote.status === "estimated") {
+    notes.push(`${estimateNote.value} (estimated). ${estimateNote.label} This is not a measured city volume.`);
+  }
   if (report.live_composite && report.live_composite.status === "insufficient_data") {
     notes.push("Insufficient data. Search demand was not returned, so there is no grade. That is not a measured zero.");
   } else if (report.live_composite && report.live_composite.grade_cap && report.live_composite.grade_cap.applied) {
@@ -1400,12 +1416,23 @@ function renderDetails(report) {
   slot.append(renderSeasonality(report));
 }
 
+function fallbackPhraseNote(demand) {
+  const estimate = demand && demand.volume_fallback && demand.volume_fallback.estimate;
+  const base = `Core term volume ${metricText(demand.search_volume)}. Clustered coverage ${metricText(demand.clustered_coverage_volume)}. The demand index uses clustered coverage volume. Word-order twins count once. Missing phrases stay missing.`;
+  if (!estimate || estimate.status !== "estimated") return base;
+  const raw = (estimate.raw_broader_volumes || []).map((row) => {
+    const volume = row.clustered_volume == null ? "null" : String(row.clustered_volume);
+    return `${row.source} ${row.level} raw ${volume}`;
+  }).join("; ");
+  return `${estimate.value} (estimated). ${estimate.label} Not a measured city volume. Raw broader numbers: ${raw || "none"}. ${base}`;
+}
+
 function renderPhrasePanel(report) {
   const demand = report.demand || {};
   const panel = el("section", { class: "res-wide" }, [
     el("h3", {}, ["Search phrases"]),
     el("p", { class: "help" }, [
-      `Core term volume ${metricText(demand.search_volume)}. Clustered coverage ${metricText(demand.clustered_coverage_volume)}. The demand index uses clustered coverage volume. Word-order twins count once. Missing phrases stay missing.`
+      fallbackPhraseNote(demand)
     ])
   ]);
   const rows = demand.keyword_rows || [];
@@ -1575,6 +1602,17 @@ function showStored(report) {
     renderGauge(report.live_composite, title, gaugeNote);
   } else if (report.score && report.score.grade_state === "insufficient_data") {
     renderGauge({ status: "insufficient_data", withheld_reason: report.score.withheld_reason }, title, gaugeNote);
+  } else if (report.score && report.score.grade_state === "estimated") {
+    renderGauge({
+      status: "calculated",
+      grade_state: "estimated",
+      demand_estimated: true,
+      composite_display: report.score.overall_display,
+      grade_cap: report.score.grade_cap,
+      demand: { index: report.score.inputs && report.score.inputs.demand_index, contribution_display: null, label: report.score.demand_estimate_label },
+      competition: { index: report.city_market && report.city_market.competition_index, contribution_display: null },
+      margin: { index: null, contribution_display: null }
+    }, title, `${gaugeNote} ${report.score.demand_estimate_label || "estimated from metro/state data, broader than the city"}`);
   } else if (report.score && report.score.grade_state === "capped_fail") {
     renderGauge({
       status: "calculated",

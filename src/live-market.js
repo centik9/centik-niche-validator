@@ -1,4 +1,5 @@
 import { bandFor } from "./scoring.js";
+import { usableFallbackEstimate } from "./volume-fallback.js";
 
 export const LIVE_LABEL = "Live Google data";
 export const EXAMPLE_LABEL = "Example data";
@@ -36,6 +37,8 @@ export function cityMarketFromReports(demand, maps, origin) {
       competition_index: null,
       search_volume: null,
       clustered_coverage_volume: null,
+      demand_estimated: false,
+      estimated_city_volume: null,
       demand_index_input: "clustered_coverage_volume",
       unique_listings: null,
       listings_without_website: null,
@@ -44,8 +47,10 @@ export function cityMarketFromReports(demand, maps, origin) {
     };
   }
   const volume = demand && demand.search_volume;
+  const estimate = usableFallbackEstimate(demand);
   const clusteredVolume = clusteredIndexVolume(demand);
-  const band = clusteredVolume === null ? null : bandFor(clusteredVolume);
+  const indexVolume = estimate ? estimate.value : clusteredVolume;
+  const band = indexVolume === null ? null : bandFor(indexVolume);
   const listingsField = maps && maps.deduplication && maps.deduplication.unique_organic_listings;
   const listings = measured(listingsField) ? listingsField.value : null;
   const withoutWebsite = Number.isInteger(maps && maps.listings_without_website) ? maps.listings_without_website : 0;
@@ -54,14 +59,18 @@ export function cityMarketFromReports(demand, maps, origin) {
   const averageReviews = votes > 0 && typeof voteSum === "number" ? voteSum / votes : 0;
   return {
     live: true,
-    demand_label: LIVE_LABEL,
+    demand_label: estimate ? estimate.label : LIVE_LABEL,
     competition_label: LIVE_LABEL,
+    demand_estimated: Boolean(estimate),
     demand_index: band ? band.index : null,
     competition_index: liveCompetitionIndex({ listings, withoutWebsite, averageReviews }),
     search_volume: measured(volume) ? volume.value : null,
     clustered_coverage_volume: clusteredVolume,
-    demand_index_input: "clustered_coverage_volume",
-    demand_index_note: "The demand index is the band of clustered coverage volume. The core term volume is search_volume and is not the index input. Missing keyword rows are omitted from the sum, not entered as zero.",
+    estimated_city_volume: estimate ? estimate.value : null,
+    demand_index_input: estimate ? "volume_fallback_estimate" : "clustered_coverage_volume",
+    demand_index_note: estimate
+      ? `${estimate.label}. ${estimate.bing_note ? `${estimate.bing_note} ` : ""}${estimate.method} The city search_volume field is unchanged.`
+      : "The demand index is the band of clustered coverage volume. The core term volume is search_volume and is not the index input. Missing keyword rows are omitted from the sum, not entered as zero.",
     unique_listings: listings,
     listings_without_website: listings === null ? null : withoutWebsite,
     average_reviews: listings === null ? null : Math.round(averageReviews),

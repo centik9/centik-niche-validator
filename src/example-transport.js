@@ -1,4 +1,4 @@
-import { MAPS_PATH, ORGANIC_PATH, SEARCH_VOLUME_PATH, TRENDS_PATH, USER_DATA_PATH } from "./config.js";
+import { BING_SEARCH_VOLUME_PATH, MAPS_PATH, ORGANIC_PATH, SEARCH_VOLUME_PATH, TRENDS_PATH, USER_DATA_PATH } from "./config.js";
 import { assertSafeRequest } from "./dataforseo.js";
 import { DataForSeoError } from "./errors.js";
 import { exampleRows } from "./gazetteer.js";
@@ -269,6 +269,9 @@ export function createExampleTransport() {
       if (method === "GET" && path === USER_DATA_PATH) {
         return { tasks: [{ status_code: 20000, result: [{ money: { total: 0, balance: 0 } }] }] };
       }
+      if (method === "GET" && path.includes("/bing/locations/")) {
+        return envelope([], 0);
+      }
       if (method === "GET" && /\/locations\/[a-z]{2}$/.test(path)) {
         const iso = path.slice(-2);
         let product = "google_maps";
@@ -278,7 +281,7 @@ export function createExampleTransport() {
         return envelope(rows, 0);
       }
       const task = taskOf(body);
-      if (method === "POST" && path === SEARCH_VOLUME_PATH) {
+      if (method === "POST" && (path === SEARCH_VOLUME_PATH || path === BING_SEARCH_VOLUME_PATH)) {
         const keywords = Array.isArray(task.keywords) ? task.keywords : [];
         const core = keywords[0];
         const spec = fixtureFor(core);

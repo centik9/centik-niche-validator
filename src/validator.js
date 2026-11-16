@@ -8,6 +8,7 @@ import {
   MAPS_PATH,
   ORGANIC_DEPTH,
   ORGANIC_PATH,
+  BING_SEARCH_VOLUME_PATH,
   SEARCH_VOLUME_PATH,
   TRENDS_PATH,
   TRENDS_UPSTREAM_TIMEOUT_MS,
@@ -22,7 +23,16 @@ import { combineLocationOutcomes, matchCity } from "./locations.js";
 import { mapsFromError, mapsNotSent, parseMapsPayload } from "./maps.js";
 import { organicFromError, organicNotSent, parseOrganicPayload } from "./organic.js";
 import { trendsFromError, trendsNotSent, parseTrendsPayload } from "./trends.js";
-import { selectTrendsLocation } from "./trends-location.js";
+import { resolveMetroMembership } from "./metro-membership.js";
+import { selectBingVolumeLocation, selectTrendsLocation, selectVolumeLocations } from "./trends-location.js";
+import { ADS_COST_USD, BING_VOLUME_COST_USD } from "./spend.js";
+import {
+  CITY_CORE_VOLUME_THRESHOLD,
+  broaderVolumeIsBlank,
+  buildVolumeEstimate,
+  cityVolumeNeedsFallback,
+  housingShareFor
+} from "./volume-fallback.js";
 import { buildVolumeKeywords } from "./volume-keywords.js";
 import { cityMarketFromReports } from "./live-market.js";
 import { scoreFromIndexes } from "./composite-score.js";
@@ -178,7 +188,7 @@ async function loadDemand(prepared, resolution, deps) {
       ? "Google Ads location list failed. Search volume was not requested."
       : "No confirmed Google Ads city location. Search volume was not requested.";
     audit.reason_not_sent = message;
-    return { report: demandNotSent({ status, keyword: prepared.niche, message, code: status }), audit };
+    return { report: demandNotSent({ status, keyword: prepared.niche, message, code: status }), audit, extraAudits: [] };
   }
   const keywords = buildVolumeKeywords(prepared.niche, prepared.city);
   const task = {
@@ -198,7 +208,7 @@ async function loadDemand(prepared, resolution, deps) {
     });
     audit.invoked = true;
     audit.sent_to_dataforseo = deps.origin === "live";
-    return { report, audit };
+    return broadenOrReport(report, audit, prepared, deps);
   } catch (error) {
     const report = demandFromError(error, {
       keyword: prepared.niche,
@@ -210,8 +220,182 @@ async function loadDemand(prepared, resolution, deps) {
     audit.sent_to_dataforseo = report.sent_to_dataforseo;
     audit.invoked = report.sent_to_dataforseo;
     audit.reason_not_sent = report.sent_to_dataforseo ? null : report.error && report.error.message;
-    return { report, audit };
+    return broadenOrReport(report, audit, prepared, deps);
   }
+}
+
+function volumeTask(keywords, location) {
+  return {
+    keywords,
+    location_code: location.location_code,
+    language_code: LANGUAGE_CODE,
+    search_partners: false
+  };
+}
+
+async function requestVolume(prepared, location, path, deps) {
+  const keywords = buildVolumeKeywords(prepared.niche, prepared.city);
+  const task = volumeTask(keywords, location);
+  try {
+    const payload = await deps.transport.request({ method: "POST", path, body: [task] });
+    return parseDemandPayload(payload, {
+      keyword: prepared.niche,
+      keywords,
+      location,
+      sentToDataForSeo: deps.origin === "live",
+      redact: deps.redact
+    });
+  } catch (error) {
+    return demandFromError(error, {
+      keyword: prepared.niche,
+      keywords,
+      location,
+      sentToDataForSeo: deps.origin === "live",
+      redact: deps.redact
+    });
+  }
+}
+
+function attemptFrom(source, level, location, broaderThanCity, report, queried, skipReason) {
+  const path = source === "bing" ? BING_SEARCH_VOLUME_PATH : SEARCH_VOLUME_PATH;
+  const clustered = report && report.clustered_coverage_volume;
+  const core = report && report.search_volume;
+  return {
+    source,
+    level,
+    broader_than_city: broaderThanCity,
+    queried,
+    skip_reason: skipReason || null,
+    location_code: location ? location.location_code : null,
+    location_name: location ? location.location_name : null,
+    location_type: location ? location.location_type : null,
+    endpoint: `POST ${path}`,
+    sent_to_dataforseo: Boolean(report && report.sent_to_dataforseo),
+    status: report ? report.status : "not_requested",
+    clustered_volume: clustered && Number.isInteger(clustered.value) ? clustered.value : null,
+    clustered_status: clustered ? clustered.status : null,
+    core_volume: core && Number.isInteger(core.value) ? core.value : null,
+    core_status: core ? core.status : null,
+    numeric_month_count: report && report.monthly_searches ? report.monthly_searches.numeric_month_count : 0,
+    keyword_volumes: report && Array.isArray(report.keyword_rows)
+      ? report.keyword_rows.map((row) => ({
+        keyword: row.keyword,
+        status: row.search_volume ? row.search_volume.status : "missing",
+        value: row.search_volume ? row.search_volume.value : null
+      }))
+      : [],
+    provider_reported_cost_usd: report ? report.provider_reported_cost_usd : null,
+    estimated_cost_usd: source === "bing" ? BING_VOLUME_COST_USD : ADS_COST_USD,
+    error: report ? report.error : null
+  };
+}
+
+function fallbackAudit(attempt) {
+  return {
+    endpoint: attempt.endpoint,
+    billable_when_live: true,
+    conditional: true,
+    source: attempt.source,
+    level: attempt.level,
+    sent_to_dataforseo: attempt.sent_to_dataforseo,
+    invoked: attempt.queried === true,
+    reason_not_sent: attempt.queried ? (attempt.sent_to_dataforseo ? null : attempt.error && attempt.error.message) : attempt.skip_reason
+  };
+}
+
+function finishBroaden(report, decision, built, metroMembership) {
+  return {
+    report: {
+      ...report,
+      volume_fallback: {
+        triggered: true,
+        reason: decision.reason,
+        threshold: CITY_CORE_VOLUME_THRESHOLD,
+        city_core_total: decision.core_total,
+        metro_membership: metroMembership,
+        estimate: built.estimate,
+        attempts: built.attempts
+      }
+    },
+    extraAudits: built.attempts.map(fallbackAudit)
+  };
+}
+
+async function broadenDemand(report, prepared, deps) {
+  const decision = cityVolumeNeedsFallback(report);
+  if (!decision.needed || deps.origin !== "live") return { report, extraAudits: [] };
+  const query = {
+    cityNorm: prepared.cityNorm,
+    stateNorm: prepared.stateNorm,
+    countryIso: prepared.countryIso,
+    codeSource: deps.codeSource
+  };
+  let adsRows = [];
+  try {
+    const listed = await deps.directory.list("google_ads", prepared.countryIso);
+    adsRows = listed.rows;
+  } catch {
+    adsRows = [];
+  }
+  const membership = resolveMetroMembership({ city: prepared.city, state: prepared.state });
+  const locations = selectVolumeLocations(adsRows, query, membership);
+  const attempts = [];
+  let dmaReport = null;
+  if (locations.dma) {
+    dmaReport = await requestVolume(prepared, locations.dma, SEARCH_VOLUME_PATH, deps);
+    attempts.push(attemptFrom("google_ads", "metro", locations.dma, true, dmaReport, true));
+  } else {
+    attempts.push(attemptFrom("google_ads", "metro", null, true, null, false, locations.dma_skip_reason || "No Google Ads DMA was selected."));
+  }
+  const dmaUsable = Boolean(dmaReport) && !broaderVolumeIsBlank(dmaReport);
+  if (!dmaUsable && locations.state) {
+    const stateReport = await requestVolume(prepared, locations.state, SEARCH_VOLUME_PATH, deps);
+    attempts.push(attemptFrom("google_ads", "state", locations.state, true, stateReport, true));
+  } else if (dmaUsable) {
+    attempts.push(attemptFrom("google_ads", "state", locations.state, true, null, false, "DMA volume was above the blank threshold, so the state volume was not requested."));
+  } else {
+    attempts.push(attemptFrom("google_ads", "state", null, true, null, false, "No state location row matched, so state volume was not requested."));
+  }
+  let bingPick = { level: "unavailable", match: null, broader_than_city: true };
+  try {
+    const listed = await deps.directory.list("bing", prepared.countryIso);
+    bingPick = selectBingVolumeLocation(listed.rows, query);
+  } catch {
+    bingPick = { level: "unavailable", match: null, broader_than_city: true };
+  }
+  if (bingPick.match) {
+    const bingReport = await requestVolume(prepared, bingPick.match, BING_SEARCH_VOLUME_PATH, deps);
+    attempts.push(attemptFrom("bing", bingPick.level, bingPick.match, bingPick.broader_than_city, bingReport, true));
+  } else {
+    attempts.push(attemptFrom("bing", "unavailable", null, true, null, false, "Bing has no city, metro, or state location for this market. National Bing volume was not requested."));
+  }
+  const shareFor = (attempt) => {
+    const fn = deps.housingShare || housingShareFor;
+    return fn({
+      city: prepared.city,
+      state: prepared.state,
+      level: attempt.level,
+      locationName: attempt.location_name,
+      source: attempt.source
+    });
+  };
+  let built = buildVolumeEstimate(attempts, shareFor);
+  const dmaScaled = built.attempts.find((attempt) => attempt.source === "google_ads" && attempt.level === "metro" && attempt.candidate);
+  const stateQueried = built.attempts.some((attempt) => attempt.source === "google_ads" && attempt.level === "state" && attempt.queried);
+  if (dmaReport && !dmaScaled && locations.state && !stateQueried) {
+    const stateReport = await requestVolume(prepared, locations.state, SEARCH_VOLUME_PATH, deps);
+    const stateAttempt = attemptFrom("google_ads", "state", locations.state, true, stateReport, true);
+    const replaced = built.attempts.map((attempt) => (
+      attempt.source === "google_ads" && attempt.level === "state" ? stateAttempt : attempt
+    ));
+    built = buildVolumeEstimate(replaced, shareFor);
+  }
+  return finishBroaden(report, decision, built, locations.membership);
+}
+
+async function broadenOrReport(report, audit, prepared, deps) {
+  const broadened = await broadenDemand(report, prepared, deps);
+  return { report: broadened.report, audit, extraAudits: broadened.extraAudits };
 }
 
 async function loadMaps(prepared, resolution, deps) {
@@ -397,15 +581,30 @@ async function loadTrends(prepared, deps) {
   }
 }
 
+function markEstimatedComposite(composite, cityMarket) {
+  if (!composite || !cityMarket || !cityMarket.demand_estimated || composite.status !== "calculated") return composite;
+  return {
+    ...composite,
+    grade_state: "estimated",
+    demand_estimated: true,
+    data_label: cityMarket.demand_label,
+    demand: {
+      ...composite.demand,
+      label: cityMarket.demand_label,
+      monthly_searches: cityMarket.estimated_city_volume
+    }
+  };
+}
+
 function liveCompositeFor({ origin, cityMarket, marginIndex, marginEstimated, score }) {
   if (origin !== "live") return null;
   if (marginIndex !== null && cityMarket.demand_index !== null && cityMarket.competition_index !== null) {
-    return scoreFromIndexes({
+    return markEstimatedComposite(scoreFromIndexes({
       demandIndex: cityMarket.demand_index,
       competitionIndex: cityMarket.competition_index,
       marginIndex,
       estimated: marginEstimated === true
-    });
+    }), cityMarket);
   }
   if (cityMarket.demand_index === 0) {
     const display = score.overall_display || "14.9";
@@ -532,7 +731,7 @@ export async function validateNiche(input, deps) {
     },
     live_composite: liveComposite,
     score,
-    requests: [...resolution.requests, demand.audit, maps.audit, organic.audit, trends.audit],
+    requests: [...resolution.requests, demand.audit, ...(demand.extraAudits || []), maps.audit, organic.audit, trends.audit],
     limitations: STANDING_LIMITATIONS
   };
 }
