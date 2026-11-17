@@ -107,6 +107,7 @@ export function organicShell({ status, location, sentToDataForSeo, message, code
     location,
     sent_to_dataforseo: Boolean(sentToDataForSeo),
     results: [],
+    paid_results: [],
     ignored_non_organic: 0,
     directory_counts: directoryCounts([]),
     used_in_competition_index: false,
@@ -118,6 +119,17 @@ export function organicShell({ status, location, sentToDataForSeo, message, code
 
 export function organicNotSent({ status, message, code, keyword }) {
   return organicShell({ status, location: null, sentToDataForSeo: false, message, code, keyword });
+}
+
+function paidView(item) {
+  const domain = clip(item.domain, 200) || hostnameOf(item.url) || null;
+  return {
+    rank: Number.isInteger(item.rank_absolute) ? item.rank_absolute : null,
+    title: clip(item.title, 300),
+    description: clip(item.description, 500),
+    url: clip(item.url, 500),
+    domain
+  };
 }
 
 function organicView(item, index) {
@@ -161,10 +173,12 @@ export function parseOrganicPayload(payload, context) {
     return missing;
   }
   const organic = [];
+  const paid = [];
   let ignored = 0;
   for (const item of serp.items) {
     if (!item || typeof item !== "object" || item.type !== "organic") {
       ignored += 1;
+      if (item && item.type === "paid") paid.push(item);
       continue;
     }
     organic.push(item);
@@ -182,6 +196,7 @@ export function parseOrganicPayload(payload, context) {
     keyword: context.keyword
   });
   report.results = results;
+  report.paid_results = paid.slice(0, 10).map(paidView);
   report.ignored_non_organic = ignored;
   report.directory_counts = directoryCounts(results);
   if (!results.length) report.directory_counts.status = "measured_zero";

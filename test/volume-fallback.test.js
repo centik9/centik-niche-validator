@@ -446,12 +446,12 @@ test("a city volume above the threshold does not spend on fallback calls", async
 });
 
 test("the quote includes fallback costs and the cap blocks a worst case over the remaining budget", async () => {
-  assert.equal(QUERY_COST_USD, 0.105);
-  assert.equal(WORST_CASE_QUERY_COST_USD, 0.375);
+  assert.equal(QUERY_COST_USD, 0.109);
+  assert.equal(WORST_CASE_QUERY_COST_USD, 0.381);
   const calls = quotedPaidCalls();
-  assert.equal(calls.length, 7);
-  assert.equal(calls.filter((call) => call.conditional).length, 3);
-  assert.equal(calls.reduce((sum, call) => sum + Math.round(call.estimated_cost_usd * 1000), 0), 375);
+  assert.equal(calls.length, 10);
+  assert.equal(calls.filter((call) => call.conditional).length, 4);
+  assert.equal(calls.reduce((sum, call) => sum + Math.round(call.estimated_cost_usd * 1000), 0), 381);
   assert.ok(calls.some((call) => /DMA fallback/.test(call.purpose) && call.estimated_cost_usd === ADS_COST_USD));
   assert.ok(calls.some((call) => /state fallback/.test(call.purpose) && call.estimated_cost_usd === ADS_COST_USD));
   assert.ok(calls.some((call) => /Bing Ads/.test(call.purpose) && call.estimated_cost_usd === BING_VOLUME_COST_USD));
@@ -471,10 +471,10 @@ test("the quote includes fallback costs and the cap blocks a worst case over the
     readAccountSpent: async () => 100
   });
   const quoted = await open.quote("team@centik.ai", prepared, { requireAccount: true });
-  assert.equal(quoted.estimated_cost_usd, 0.375);
-  assert.equal(quoted.worst_case_cost_usd, 0.375);
-  assert.equal(quoted.base_estimated_cost_usd, 0.105);
-  assert.equal(quoted.calls.length, 7);
+  assert.equal(quoted.estimated_cost_usd, 0.381);
+  assert.equal(quoted.worst_case_cost_usd, 0.381);
+  assert.equal(quoted.base_estimated_cost_usd, 0.109);
+  assert.equal(quoted.calls.length, 10);
 
   const tight = createSpendGate({
     capUsd: 10,

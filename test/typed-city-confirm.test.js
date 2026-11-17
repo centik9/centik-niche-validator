@@ -106,7 +106,7 @@ test("example location codes for a typed city 409 on live validate and do not sp
       geography_type: "city",
       confirmed: exampleConfirmed
     })).json();
-    assert.equal(quoted.estimated_cost_usd, 0.375);
+    assert.equal(quoted.estimated_cost_usd, 0.381);
     const before = calls.length;
     const denied = await postJson(port, "/api/validate", {
       mode: "live",
@@ -213,7 +213,7 @@ test("a typed city confirmed with the live location list completes the paid chec
       confirmed
     })).json();
     assert.equal(quoted.market, "Bella Vista, Arkansas");
-    assert.equal(quoted.estimated_cost_usd, 0.375);
+    assert.equal(quoted.estimated_cost_usd, 0.381);
     assert.equal(quoted.calls.find((call) => call.path.endsWith("/maps/live/advanced")).depth, 100);
     const validated = await postJson(port, "/api/validate", {
       mode: "live",

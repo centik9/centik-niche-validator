@@ -179,17 +179,19 @@ test("the result cache key cannot replay a volume-only or depth-20 check", async
   assert.equal(await gate.freshResult({ ...bind, niche: "other" }), null);
 });
 
-test("the paid quote is exactly 0.105 across four calls", () => {
+test("the paid quote base is 0.109 across six calls", () => {
   const calls = paidCalls();
   assert.deepEqual(calls.map((call) => [call.purpose, call.estimated_cost_usd]), [
     ["Google Ads search volume live", 0.09],
     ["Maps live advanced, depth 100", 0.002],
     ["Google organic live, depth 10", 0.002],
-    ["Google Trends explore live", 0.011]
+    ["Google Trends explore live", 0.011],
+    ["Google Ads advertisers live, core keyword", 0.002],
+    ["Google Ads advertisers live, near me keyword", 0.002]
   ]);
   assert.equal(calls.find((call) => call.path.endsWith("/maps/live/advanced")).depth, 100);
-  assert.equal(QUERY_COST_USD, 0.105);
-  assert.equal(calls.reduce((sum, call) => sum + Math.round(call.estimated_cost_usd * 1000), 0), 105);
+  assert.equal(QUERY_COST_USD, 0.109);
+  assert.equal(calls.reduce((sum, call) => sum + Math.round(call.estimated_cost_usd * 1000), 0), 109);
 });
 
 test("an organic failure does not withhold a measured volume and Maps check", async () => {

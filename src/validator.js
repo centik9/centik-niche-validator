@@ -37,6 +37,9 @@ import { buildVolumeKeywords } from "./volume-keywords.js";
 import { cityMarketFromReports } from "./live-market.js";
 import { scoreFromIndexes } from "./composite-score.js";
 import { buildScore } from "./scoring.js";
+import { buildAdsMarket, loadAdsTransparency } from "./ads-market.js";
+import { buildConversionReadiness, collectLeadPages } from "./conversion-readiness.js";
+import { buildResultsRisk } from "./results-risk.js";
 
 const BLOCK_MESSAGE = {
   ambiguous: "More than one city row matches this city, state, and country. No row was selected. Search volume and Maps were not requested.",
@@ -679,12 +682,18 @@ export async function validateNiche(input, deps) {
   const prepared = input && input.cityNorm && input.confirmed ? input : parseValidateInput(input);
   const resolution = await resolvePrepared(prepared, deps);
   assertConfirmation(resolution, prepared.confirmed);
+  const adsPromise = loadAdsTransparency(prepared, deps);
   const [demand, maps, organic, trends] = await Promise.all([
     loadDemand(prepared, resolution, deps),
     loadMaps(prepared, resolution, deps),
     loadOrganic(prepared, resolution, deps),
     loadTrends(prepared, deps)
   ]);
+  const [pages, ads] = await Promise.all([
+    collectLeadPages({ results: organic.report.results, origin: deps.origin, fetchImpl: deps.pageFetch }),
+    adsPromise
+  ]);
+  const generatedAt = new Date((deps.now || Date.now)()).toISOString();
   const score = buildScore({ demand: demand.report, maps: maps.report, origin: deps.origin });
   const cityMarket = cityMarketFromReports(demand.report, maps.report, deps.origin);
   const marginIndex = Number.isInteger(prepared.margin_index) ? prepared.margin_index : null;
@@ -701,7 +710,7 @@ export async function validateNiche(input, deps) {
     example_banner: deps.origin === "example" ? EXAMPLE_BANNER : null,
     live_banner: deps.origin === "live" ? LIVE_BANNER : null,
     market_measurement: marketMeasurement(deps.origin),
-    generated_at: new Date((deps.now || Date.now)()).toISOString(),
+    generated_at: generatedAt,
     niche: prepared.niche,
     normalized_query: resolution.normalized_query,
     location: {
@@ -731,7 +740,28 @@ export async function validateNiche(input, deps) {
     },
     live_composite: liveComposite,
     score,
-    requests: [...resolution.requests, demand.audit, ...(demand.extraAudits || []), maps.audit, organic.audit, trends.audit],
+    conversion_readiness: buildConversionReadiness({
+      demand: demand.report,
+      organic: organic.report,
+      pages,
+      origin: deps.origin,
+      measuredAt: generatedAt
+    }),
+    ads_market: buildAdsMarket({
+      niche: prepared.niche,
+      organic: organic.report,
+      trends: trends.report,
+      ads,
+      origin: deps.origin,
+      measuredAt: generatedAt,
+      now: deps.now
+    }),
+    results_risk: buildResultsRisk({
+      state: prepared.state,
+      origin: deps.origin,
+      measuredAt: generatedAt
+    }),
+    requests: [...resolution.requests, demand.audit, ...(demand.extraAudits || []), maps.audit, organic.audit, trends.audit, ...(ads.audits || [])],
     limitations: STANDING_LIMITATIONS
   };
 }

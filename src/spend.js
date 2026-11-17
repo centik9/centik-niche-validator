@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { BING_SEARCH_VOLUME_PATH, KEYWORD_IDEAS_PATH, MAPS_PATH, ORGANIC_PATH, SEARCH_VOLUME_PATH, TRENDS_PATH } from "./config.js";
+import { ADS_ADVERTISERS_PATH, ADS_SEARCH_PATH, BING_SEARCH_VOLUME_PATH, KEYWORD_IDEAS_PATH, MAPS_PATH, ORGANIC_PATH, SEARCH_VOLUME_PATH, TRENDS_PATH } from "./config.js";
 import { openResultStore } from "./result-store.js";
 import { VOLUME_KEYWORD_SET_ID } from "./volume-keywords.js";
 
@@ -9,7 +9,9 @@ export const ADS_COST_USD = 0.09;
 export const MAPS_COST_USD = 0.002;
 export const ORGANIC_COST_USD = 0.002;
 export const TRENDS_COST_USD = 0.011;
-export const QUERY_COST_USD = 0.105;
+export const ADS_ADVERTISERS_COST_USD = 0.002;
+export const ADS_SEARCH_COST_USD = 0.002;
+export const QUERY_COST_USD = 0.109;
 export const BING_VOLUME_COST_USD = 0.09;
 export const KEYWORD_IDEAS_TASK_USD = 0.012;
 export const KEYWORD_IDEAS_ITEM_USD = 0.00012;
@@ -77,8 +79,31 @@ export function paidCalls() {
       path: TRENDS_PATH,
       purpose: "Google Trends explore live",
       estimated_cost_usd: TRENDS_COST_USD
+    },
+    {
+      method: "POST",
+      path: ADS_ADVERTISERS_PATH,
+      purpose: "Google Ads advertisers live, core keyword",
+      estimated_cost_usd: ADS_ADVERTISERS_COST_USD
+    },
+    {
+      method: "POST",
+      path: ADS_ADVERTISERS_PATH,
+      purpose: "Google Ads advertisers live, near me keyword",
+      estimated_cost_usd: ADS_ADVERTISERS_COST_USD
     }
   ];
+}
+
+export function adsHistoryCall() {
+  return {
+    method: "POST",
+    path: ADS_SEARCH_PATH,
+    purpose: "Google Ads search live, depth 40, only when advertiser ids come back",
+    conditional: true,
+    depth: 40,
+    estimated_cost_usd: ADS_SEARCH_COST_USD
+  };
 }
 
 export function fallbackPaidCalls() {
@@ -108,7 +133,7 @@ export function fallbackPaidCalls() {
 }
 
 export function quotedPaidCalls() {
-  return [...paidCalls(), ...fallbackPaidCalls()];
+  return [...paidCalls(), adsHistoryCall(), ...fallbackPaidCalls()];
 }
 
 function sumCallCost(calls) {
@@ -495,6 +520,11 @@ export function createSpendGate(options = {}) {
     ];
     if (report.organic && report.organic.sent_to_dataforseo) calls.push(callEntry(`POST ${ORGANIC_PATH}`, report.organic, ORGANIC_COST_USD));
     if (report.trends && report.trends.sent_to_dataforseo) calls.push(callEntry(`POST ${TRENDS_PATH}`, report.trends, TRENDS_COST_USD));
+    const adsRequests = report.ads_market && report.ads_market.requests;
+    for (const attempt of Array.isArray(adsRequests) ? adsRequests : []) {
+      if (!attempt || !attempt.sent_to_dataforseo) continue;
+      calls.push(callEntry(attempt.endpoint, attempt, attempt.estimated_cost_usd || ADS_SEARCH_COST_USD));
+    }
     const attempts = report.demand && report.demand.volume_fallback && report.demand.volume_fallback.attempts;
     for (const attempt of Array.isArray(attempts) ? attempts : []) {
       if (!attempt || !attempt.sent_to_dataforseo) continue;

@@ -704,6 +704,7 @@ function renderGauge(composite, title, note) {
     ]));
   }
   if (score != null) playReveal(score, display);
+  if (window.SignalCards) SignalCards.setMarket(score);
 }
 
 /* lead-conversion-rates-start */
@@ -1646,6 +1647,7 @@ function showStored(report) {
   }
   markCached(true, { score: Boolean(report.live_composite) });
   paintStamp();
+  if (window.SignalCards) SignalCards.show(report, { past: pastSignalValues() });
 }
 
 function clearStored() {
@@ -1655,6 +1657,10 @@ function clearStored() {
   if (had) renderResults("", null);
   markCached(false);
   paintStamp();
+  if (window.SignalCards) {
+    if (!liveMode && state.signalReport) SignalCards.show(state.signalReport);
+    else SignalCards.show(null, { live: liveMode });
+  }
 }
 
 async function chooseSubniche(row) {
@@ -1678,6 +1684,8 @@ async function chooseSubniche(row) {
   if (mapCard) { mapCard.classList.remove("flash"); void mapCard.offsetWidth; mapCard.classList.add("flash"); }
   $("live").textContent = `Step 2 map updated for ${row.label}. Sample heat only.`;
   renderGauge(null, `${row.label}. Pick a city in Step 2.`, "");
+  state.signalReport = null;
+  if (window.SignalCards) SignalCards.show(null, { live: liveMode });
   renderEstimates(null);
   renderResults("", null);
   renderSketch(null);
@@ -1757,6 +1765,44 @@ async function chooseLocation(card) {
   renderQuote(state.quote, state.proposal);
   if (!state.quote && state.quoteError) $("paid-note").textContent = state.quoteError;
   paintStepper();
+  if (!liveMode && state.confirmed) loadSampleSignals();
+  else if (window.SignalCards && !state.storedReport) SignalCards.show(null, { live: liveMode });
+}
+
+let signalToken = 0;
+
+function pastSignalValues() {
+  const values = (key) => (state.runs || [])
+    .filter((run) => run.origin === "live" && run[key] && run[key].status === "measured" && Number.isInteger(run[key].value))
+    .map((run) => run[key].value);
+  return {
+    conversion_readiness: values("conversion_readiness"),
+    ads_market: values("ads_market"),
+    results_risk: values("results_risk")
+  };
+}
+
+async function loadSampleSignals() {
+  if (!window.SignalCards || liveMode || !state.confirmed || !state.subniche || !state.location) return;
+  const token = ++signalToken;
+  SignalCards.show(null, { loading: true });
+  try {
+    const report = await post("/api/validate", {
+      mode: "example",
+      niche: state.subniche.label,
+      city: state.location.name,
+      state: state.location.state,
+      country: "United States",
+      confirmed: state.confirmed,
+      lens: state.lens
+    });
+    if (token !== signalToken || state.storedReport) return;
+    state.signalReport = report;
+    SignalCards.show(report);
+  } catch (error) {
+    if (token !== signalToken) return;
+    SignalCards.show(null, { error: error.message || "This signal could not be loaded." });
+  }
 }
 
 function quoteBody(rerun) {
@@ -1801,6 +1847,7 @@ async function runPaid() {
   state.busy = true;
   $("pay-go").disabled = true;
   $("paid-note").textContent = rerun ? "Confirming the rerun…" : "Confirming the paid check…";
+  if (window.SignalCards) SignalCards.show(null, { loading: true });
   let failed = "";
   try {
     const quoted = await post("/api/quote", quoteBody(rerun));
@@ -2534,6 +2581,15 @@ function groupRuns(runs) {
   return [...groups.values()];
 }
 
+function extraScoreCell(field) {
+  if (!field || !Number.isFinite(Number(field.value))) return el("td", {}, ["Not measured"]);
+  const score = Math.round(Number(field.value));
+  const zone = zoneOf(score);
+  const chip = el("span", { class: "zone-chip" }, [zone.name]);
+  chip.style.color = `var(${zone.c})`;
+  return el("td", {}, [el("span", { class: "num" }, [String(score)]), " ", chip]);
+}
+
 function renderHistory(runs) {
   const slot = $("history-list");
   slot.hidden = false;
@@ -2555,7 +2611,7 @@ function renderHistory(runs) {
         : `Maps depth ${sample.maps_depth == null ? "not stored" : sample.maps_depth} · ${sample.check_version || "preview"}`])
     ]);
     const table = el("table", { class: "run-table" });
-    table.append(el("tr", {}, ["Date", "Score", "Searches", "Map pack", "Grade", "Lens used", ""].map((label) => el("th", {}, [label]))));
+    table.append(el("tr", {}, ["Date", "Score", "Searches", "Map pack", "Grade", "Conversion readiness", "Ads market", "Results risk", "Lens used", ""].map((label) => el("th", {}, [label]))));
     group.forEach((run) => {
       const zone = run.zone && run.zone.value ? run.zone.value : "Unavailable";
       const score = run.market_score && run.market_score.value != null ? String(run.market_score.value) : "Unavailable";
@@ -2569,6 +2625,9 @@ function renderHistory(runs) {
         el("td", { class: "num" }, [volume]),
         el("td", {}, [pack]),
         el("td", {}, [el("span", { class: "zone-chip" }, [zone])]),
+        extraScoreCell(run.conversion_readiness),
+        extraScoreCell(run.ads_market),
+        extraScoreCell(run.results_risk),
         el("td", {}, [run.lens_label || "Not stored"]),
         el("td", {}, [open])
       ]));
@@ -2728,6 +2787,7 @@ document.querySelectorAll(".seg button").forEach((button) => {
     document.querySelector(`.seg button[data-lens="${next}"]`).focus();
   });
 });
+if (window.SignalCards) SignalCards.show(null);
 const compareButton = $("compare-runs");
 if (compareButton) {
   compareButton.addEventListener("click", () => {

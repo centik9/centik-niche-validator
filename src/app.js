@@ -294,7 +294,7 @@ export function createApp(options = {}) {
       res.end(data);
       return;
     }
-    if (req.method === "GET" && (pathname === "/login.js" || pathname === "/styles.css" || pathname === "/dashboard.js")) {
+    if (req.method === "GET" && (pathname === "/login.js" || pathname === "/styles.css" || pathname === "/dashboard.js" || pathname === "/signal-cards.js")) {
       const name = pathname.slice(1);
       const data = await fs.readFile(path.join(PUBLIC_DIR, name));
       res.writeHead(200, {
