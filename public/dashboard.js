@@ -113,6 +113,8 @@ const state = {
 let suggestTimer = 0;
 let specialtyRequest = 0;
 let liveMode = false;
+let spendSnapshot = null;
+const ACCOUNT_SPEND_LABEL = "DataForSEO account";
 
 function resetSpecialtyConfirm() {
   state.specialtyQuote = null;
@@ -1303,8 +1305,24 @@ function renderQuote(quote, proposal) {
   }
   const cap = quote ? quote.cap_usd : 0;
   const used = quote ? quote.spent_usd : 0;
-  $("spent-label").textContent = quote ? `${money(used)} of ${money(cap)}` : "$0.00";
-  $("budget-bar").style.width = cap ? `${Math.min(100, (used / cap) * 100)}%` : "0";
+  if (quote) {
+    paintSpendFigures(used, cap);
+    if (quote.account_checked) {
+      spendSnapshot = {
+        spent_usd: quote.spent_usd,
+        cap_usd: quote.cap_usd,
+        spend_source: "dataforseo_account",
+        spend_label: ACCOUNT_SPEND_LABEL
+      };
+      paintSpendCaption(ACCOUNT_SPEND_LABEL);
+    }
+  } else if (spendSnapshot && spendSnapshot.spend_label) {
+    paintSpendFigures(spendSnapshot.spent_usd, spendSnapshot.cap_usd);
+    paintSpendCaption(spendSnapshot.spend_label);
+  } else {
+    $("spent-label").textContent = "$0.00";
+    $("budget-bar").style.width = "0";
+  }
   const go = $("pay-go");
   go.textContent = stored ? "Rerun paid check" : "Okay, run paid check";
   go.classList.toggle("money", stored);
@@ -1948,6 +1966,33 @@ $("pay-cancel").addEventListener("click", () => {
   $("paid-note").textContent = "Canceled. Nothing was sent.";
   paintStepper();
 });
+
+function paintSpendFigures(used, cap) {
+  const spent = Number(used);
+  const limit = Number(cap);
+  if (!Number.isFinite(spent) || !Number.isFinite(limit)) return;
+  $("spent-label").textContent = `${money(spent)} of ${money(limit)}`;
+  $("budget-bar").style.width = limit ? `${Math.min(100, (spent / limit) * 100)}%` : "0";
+}
+
+function paintSpendCaption(label) {
+  const caption = $("spend-caption");
+  if (caption && label) caption.textContent = label;
+}
+
+function rememberSpend(payload) {
+  if (!payload || !payload.spend_label) return;
+  if (state.quote && state.quote.account_checked) return;
+  spendSnapshot = payload;
+  if (!state.quote) {
+    paintSpendFigures(payload.spent_usd, payload.cap_usd);
+    paintSpendCaption(payload.spend_label);
+  }
+}
+
+fetch("/api/spend").then((response) => response.ok ? response.json() : null).then((payload) => {
+  rememberSpend(payload);
+}).catch(() => {});
 
 fetch("/health").then((response) => response.json()).then((health) => {
   const on = Boolean(health.live_mode);

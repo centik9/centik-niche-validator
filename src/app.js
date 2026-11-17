@@ -63,6 +63,8 @@ function baselineUsd(env) {
 }
 
 const SPEND_BLOCKS = new Set(["spend_cap_exceeded", "spend_baseline_missing", "spend_account_unavailable"]);
+const ACCOUNT_SPEND_LABEL = "DataForSEO account";
+const LEDGER_SPEND_LABEL = "local count since last restart";
 
 function numberEnv(value, fallback) {
   const parsed = Number(value);
@@ -355,7 +357,40 @@ export function createApp(options = {}) {
       return;
     }
     if (req.method === "GET" && pathname === "/api/spend") {
-      send(res, 200, spend.totals());
+      try {
+        await spend.ready;
+      } catch {
+        // The in-memory ledger is still the fallback total.
+      }
+      const state = spend.totals();
+      if (!liveEnabled(env)) {
+        send(res, 200, state);
+        return;
+      }
+      let account = null;
+      try {
+        account = await spend.accountDisplay();
+      } catch {
+        account = null;
+      }
+      if (!account) {
+        send(res, 200, {
+          ...state,
+          spend_source: "local_ledger",
+          spend_label: LEDGER_SPEND_LABEL
+        });
+        return;
+      }
+      send(res, 200, {
+        ...state,
+        spent_usd: account.spent_usd,
+        cap_usd: account.cap_usd,
+        remaining_usd: account.remaining_usd,
+        baseline_usd: account.baseline_usd,
+        account_total_spent_usd: account.account_total_spent_usd,
+        spend_source: "dataforseo_account",
+        spend_label: ACCOUNT_SPEND_LABEL
+      });
       return;
     }
     if (req.method === "GET" && (pathname === "/api/runs" || pathname === "/api/runs/diff")) {
