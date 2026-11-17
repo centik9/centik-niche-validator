@@ -245,7 +245,7 @@ export function createSpendGate(options = {}) {
     }];
   }
 
-  async function accountPosition(costUsd) {
+  async function readAccountUsed() {
     if (baselineUsd == null) {
       const error = new Error("DATAFORSEO_SPENT_BASELINE_USD is not set. Live checks are refused. No paid request was sent.");
       error.code = "spend_baseline_missing";
@@ -268,19 +268,41 @@ export function createSpendGate(options = {}) {
       error.status = 403;
       throw error;
     }
-    const usedUnits = milli(parsed - baselineUsd);
-    if (usedUnits + milli(costUsd) > capUnits) {
-      const error = new Error("This check would pass the spend cap. No DataForSEO request was sent.");
-      error.code = "spend_cap_exceeded";
-      error.status = 403;
-      throw error;
-    }
+    return { parsed, usedUnits: milli(parsed - baselineUsd) };
+  }
+
+  function accountFigure(parsed, usedUnits) {
     return {
       account_total_spent_usd: parsed,
       baseline_usd: baselineUsd,
       spent_usd: dollars(usedUnits),
       remaining_usd: dollars(capUnits - usedUnits)
     };
+  }
+
+  async function accountPosition(costUsd) {
+    const reading = await readAccountUsed();
+    if (reading.usedUnits + milli(costUsd) > capUnits) {
+      const error = new Error("This check would pass the spend cap. No DataForSEO request was sent.");
+      error.code = "spend_cap_exceeded";
+      error.status = 403;
+      throw error;
+    }
+    return accountFigure(reading.parsed, reading.usedUnits);
+  }
+
+  // Display only. Quote, validate, and specialty gating still go through accountPosition.
+  async function accountDisplay() {
+    try {
+      const reading = await readAccountUsed();
+      return {
+        ...accountFigure(reading.parsed, reading.usedUnits),
+        cap_usd: dollars(capUnits)
+      };
+    } catch (error) {
+      if (error && (error.code === "spend_baseline_missing" || error.code === "spend_account_unavailable")) return null;
+      throw error;
+    }
   }
 
   function signToken(bind) {
@@ -524,6 +546,7 @@ export function createSpendGate(options = {}) {
     remember,
     record,
     accountPosition,
+    accountDisplay,
     quoteDiscovery,
     acceptDiscovery,
     recordDiscovery
