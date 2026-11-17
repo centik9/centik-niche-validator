@@ -1294,20 +1294,25 @@ function renderQuote(quote, proposal) {
   const showCancel = stored ? state.rerunArmed : Boolean(quote);
   $("pay-cancel").hidden = !showCancel;
   $("pay-cancel").disabled = !showCancel || state.busy;
-  $("paid-warn").hidden = stored && !state.rerunArmed;
+  $("paid-warn").hidden = !liveMode || (stored && !state.rerunArmed);
   const worstCaseNote = chargeCalls.some((call) => call.conditional)
     ? " This total is the worst case. The DMA, state, and Bing volume calls run only if city Google Ads volume is blank or near zero."
     : "";
   const breakdown = chargeCalls.length
     ? `${chargeCalls.map((call) => `${call.purpose} ${quoteMoney(call.estimated_cost_usd)}`).join(". ")}. Total ${quoteMoney(chargeCost)}. Location lists are free and are not in this cost.${worstCaseNote}`
     : "";
+  if (!liveMode && calls) {
+    calls.replaceChildren(el("li", {}, ["Example data only. No DataForSEO request is sent."]));
+  }
   $("paid-note").textContent = locked
     ? "Hard stop. Step 4 stays locked."
-    : stored
-      ? "This starts a new paid DataForSEO run and will be charged."
-      : breakdown;
+    : !liveMode
+      ? "Live mode is off. Okay runs example data for this city. No DataForSEO request is sent."
+      : stored
+        ? "This starts a new paid DataForSEO run and will be charged."
+        : breakdown;
   const heading = $("h-paid");
-  if (heading) heading.textContent = stored && !state.rerunArmed ? "Saved check" : "Confirm paid check";
+  if (heading) heading.textContent = stored && !state.rerunArmed ? "Saved check" : (!liveMode ? "Example check" : "Confirm paid check");
   const pill = $("paid-pill");
   if (stored && state.rerunArmed) {
     pill.textContent = "Confirm";
@@ -1381,9 +1386,10 @@ function renderResults(message, report) {
   const insufficient = !real && Boolean(state.proposal && state.proposal.insufficient_data);
   const caption = real ? "From last check." : insufficient ? "Insufficient data. A measured check is needed." : "Sample, not live";
   const searchesEstimated = typeof searches === "string" && searches.endsWith("(estimated)");
-  slot.append(resTile("Monthly searches", searches, real ? searchesCaption : caption, RES_SPARKS.searches, searchesEstimated));
-  slot.append(resTile("Map pack rivals", rivals, caption, RES_SPARKS.rivals, false));
-  slot.append(resTile("Top ad bid", bid, bid === "Insufficient data" || bid === "$0.00 (measured)" ? searchesCaption : caption, RES_SPARKS.bid, true));
+  const quietCaption = searchesEstimated ? "Sample, not live" : caption;
+  slot.append(resTile("Monthly searches", searches, searchesEstimated || real ? searchesCaption : caption, RES_SPARKS.searches, searchesEstimated));
+  slot.append(resTile("Map pack rivals", rivals, quietCaption, RES_SPARKS.rivals, false));
+  slot.append(resTile("Top ad bid", bid, bid === "Insufficient data" || bid === "$0.00 (measured)" ? searchesCaption : quietCaption, RES_SPARKS.bid, true));
   if (message) slot.append(el("p", { class: message.toLowerCase().includes("not") ? "error res-note" : "help res-note" }, [message]));
   renderDetails(report);
 }
@@ -1623,7 +1629,7 @@ function showStored(report) {
       margin: { index: null, contribution_display: null }
     }, title, gaugeNote);
   }
-  markCached(true, { score: Boolean(report.live_composite) });
+  markCached(report.example_data !== true, { score: Boolean(report.live_composite) });
   paintStamp();
 }
 
@@ -1787,7 +1793,7 @@ async function runPaid() {
     state.rerunArmed = rerun;
     renderQuote(quoted, state.proposal);
     const report = await post("/api/validate", {
-      mode: "live",
+      mode: liveMode ? "live" : "example",
       rerun,
       spend_token: quoted.spend_token,
       margin_index: state.proposal.composite && state.proposal.composite.margin ? state.proposal.composite.margin.index : undefined,

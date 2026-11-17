@@ -323,7 +323,9 @@ function finishBroaden(report, decision, built, metroMembership) {
 
 async function broadenDemand(report, prepared, deps) {
   const decision = cityVolumeNeedsFallback(report);
-  if (!decision.needed || deps.origin !== "live") return { report, extraAudits: [] };
+  // previewFallback is set only by the temporary example preview. It stays off for a normal example check.
+  const previewExample = deps.origin === "example" && deps.previewFallback === true;
+  if (!decision.needed || (deps.origin !== "live" && !previewExample)) return { report, extraAudits: [] };
   const query = {
     cityNorm: prepared.cityNorm,
     stateNorm: prepared.stateNorm,
