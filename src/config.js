@@ -18,7 +18,8 @@ export const LOCATION_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 
 export const DEFAULT_RATE_LIMITS = {
   api: { windowMs: 60_000, max: 30 },
-  live: { windowMs: 10 * 60_000, max: 4 },
+  // The $10 account cap is the spending guard. This limit is only an abuse guard.
+  live: { windowMs: 10 * 60_000, max: 20 },
   globalLive: { windowMs: 60_000, max: 6 }
 };
 
