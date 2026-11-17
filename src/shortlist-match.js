@@ -2,7 +2,8 @@ import { nationalGuide } from "./discovery-fixtures.js";
 import { HttpError } from "./errors.js";
 import { priceFor } from "./job-prices.js";
 import { priceForServiceNiche } from "./niche-prices.js";
-import { resolveTypedCity } from "./city-pick.js";
+import { normalizePlace } from "./normalize.js";
+import { loadExtractCatalog } from "./screen.js";
 import { stateIdentity } from "./state-fips.js";
 import { US_STATE_ABBREVIATIONS, US_STATE_NAMES } from "./us-states.js";
 
@@ -260,29 +261,6 @@ function stripDesignator(name) {
   return parts.join(" ");
 }
 
-function labelCandidates(censusName) {
-  const raw = String(censusName || "").trim();
-  const labels = [];
-  const push = (value) => {
-    const text = String(value || "").replace(/\s+/g, " ").trim();
-    if (text.length >= 2 && text.length <= 48 && !labels.includes(text)) labels.push(text);
-  };
-  if (/balance|metropolitan government|metro government|unified government|consolidated government|urban county/i.test(raw)) {
-    const head = raw
-      .replace(/\s*\([^)]*balance[^)]*\)/ig, " ")
-      .replace(/\b(metropolitan|metro|unified|consolidated)\s+government\b/ig, " ")
-      .replace(/\burban county\b/ig, " ")
-      .replace(/\s+/g, " ")
-      .trim()
-      .split(/[-/]/)[0]
-      .trim();
-    push(head);
-  }
-  push(stripDesignator(raw));
-  push(raw);
-  return labels;
-}
-
 function olderShare(row) {
   if (!row || row.old_partial) return null;
   if (!Number.isFinite(row.old) || !Number.isFinite(row.ytot) || row.ytot <= 0 || row.old < 0) return null;
@@ -298,17 +276,51 @@ function relative(value, peers) {
   return ((value - min) * 100) / (max - min);
 }
 
-function measuredPlaces(extract, usps) {
-  const places = [];
+function stripAllDesignators(name) {
+  const parts = String(name || "").trim().split(/\s+/).filter((part) => part && !DESIGNATOR.test(part));
+  return parts.join(" ");
+}
+
+function addName(index, usps, label, geoid) {
+  const text = String(label || "").trim();
+  if (text.length < 2) return;
+  const key = `${usps}|${normalizePlace(text)}`;
+  const list = index.get(key);
+  if (!list) index.set(key, [geoid]);
+  else if (!list.includes(geoid)) list.push(geoid);
+}
+
+function chosenLabel(place, nameIndex) {
+  const primary = stripDesignator(place.n);
+  const loose = stripAllDesignators(place.n);
+  const candidates = loose && loose !== primary ? [primary, loose] : [primary];
+  for (const label of candidates) {
+    if (label.length < 2 || label.length > 48) continue;
+    if (SKIP_CITIES.has(normalizeText(label))) return null;
+    const hits = nameIndex.get(`${place.usps}|${normalizePlace(label)}`) || [];
+    if (hits.length === 1 && hits[0] === place.geoid) return label;
+  }
+  return null;
+}
+
+const shortlistIndexCache = new WeakMap();
+
+function buildShortlistIndex(extract) {
+  const byState = new Map();
+  const nameIndex = new Map();
   for (const [geoid, row] of Object.entries((extract && extract.places) || {})) {
-    if (!row || (usps && row.st !== usps)) continue;
-    if (!Number.isFinite(row.hu) || row.hu <= 0 || !Number.isFinite(row.occ) || row.occ <= 0) continue;
-    if (!Number.isFinite(row.own) || row.own < 0) continue;
+    if (!row) continue;
     const meta = STATE_BY_USPS.get(row.st);
     if (!meta) continue;
+    const primary = stripDesignator(row.n);
+    const loose = stripAllDesignators(row.n);
+    addName(nameIndex, meta.usps, primary, geoid);
+    if (loose !== primary) addName(nameIndex, meta.usps, loose, geoid);
+    if (!Number.isFinite(row.hu) || row.hu <= 0 || !Number.isFinite(row.occ) || row.occ <= 0) continue;
+    if (!Number.isFinite(row.own) || row.own < 0) continue;
     const owner = row.own / row.occ;
     if (!Number.isFinite(owner)) continue;
-    places.push({
+    const place = {
       geoid,
       n: row.n,
       st: row.st,
@@ -320,9 +332,42 @@ function measuredPlaces(extract, usps) {
       inc: Number.isFinite(row.inc) ? row.inc : null,
       stateTitle: meta.title,
       usps: meta.usps
-    });
+    };
+    const list = byState.get(meta.usps) || [];
+    list.push(place);
+    byState.set(meta.usps, list);
   }
-  return places;
+  function ranked(profile) {
+    const out = new Map();
+    for (const [usps, places] of byState) {
+      const pool = scorePool(places, profile);
+      const accepted = [];
+      for (const place of pool) {
+        const label = chosenLabel(place, nameIndex);
+        if (!label) continue;
+        if (SKIP_CITIES.has(normalizeText(label))) continue;
+        accepted.push({ ...place, label, score: place.score });
+        if (accepted.length >= 24) break;
+      }
+      out.set(usps, accepted);
+    }
+    return out;
+  }
+  return { neutral: ranked("neutral"), foundation: ranked("foundation") };
+}
+
+function shortlistIndex(extract) {
+  let cached = shortlistIndexCache.get(extract);
+  if (!cached) {
+    cached = buildShortlistIndex(extract);
+    shortlistIndexCache.set(extract, cached);
+  }
+  return cached;
+}
+
+export function warmShortlistIndex(extract = null) {
+  const catalog = extract && extract.places ? extract : loadExtractCatalog();
+  return shortlistIndex(catalog);
 }
 
 function preferMunicipal(pool) {
@@ -352,45 +397,12 @@ function scorePool(places, profile) {
   return pool;
 }
 
-function resolvableLabel(place, requireResolvable) {
-  const labels = labelCandidates(place.n);
-  for (const label of labels) {
-    if (SKIP_CITIES.has(normalizeText(label))) return null;
-  }
-  if (!requireResolvable) {
-    const label = labels.find((item) => !SKIP_CITIES.has(normalizeText(item)));
-    return label ? { ...place, label } : null;
-  }
-  for (const label of labels) {
-    if (SKIP_CITIES.has(normalizeText(label))) continue;
-    const resolved = resolveTypedCity(`${label}, ${place.stateTitle}`);
-    if (resolved.selected && resolved.place && resolved.place.geoid === place.geoid) {
-      return { ...place, label: resolved.place.name || label };
-    }
-  }
-  return null;
-}
-
-function acceptedCities(pool, requireResolvable, limit) {
-  const out = [];
-  for (const place of pool) {
-    const city = resolvableLabel(place, requireResolvable);
-    if (!city) continue;
-    if (SKIP_CITIES.has(normalizeText(city.label))) continue;
-    out.push(city);
-    if (out.length >= limit) break;
-  }
-  return out;
-}
-
-function citiesForProfile(extract, region, profile, options) {
-  const requireResolvable = options.requireResolvable !== false;
+function citiesForProfile(extract, region, profile) {
+  const lists = shortlistIndex(extract)[profile === "foundation" ? "foundation" : "neutral"];
   if (region.scope === "nationwide") {
     const winners = [];
-    for (const meta of STATE_BY_USPS.values()) {
-      const pool = scorePool(measuredPlaces(extract, meta.usps), profile);
-      const city = acceptedCities(pool, requireResolvable, 1)[0];
-      if (city) winners.push(city);
+    for (const cities of lists.values()) {
+      if (cities[0]) winners.push(cities[0]);
     }
     winners.sort((left, right) => {
       if (profile === "foundation" && left.older != null && right.older != null && left.older !== right.older) return right.older - left.older;
@@ -399,8 +411,7 @@ function citiesForProfile(extract, region, profile, options) {
     });
     return winners.slice(0, 8);
   }
-  const pool = scorePool(measuredPlaces(extract, region.state.usps), profile);
-  return acceptedCities(pool, requireResolvable, 24);
+  return lists.get(region.state.usps) || [];
 }
 
 function notMeasured(note) {
@@ -519,7 +530,7 @@ export function buildRegionCandidates(services, region, extract, options = {}) {
   const used = new Map();
   const rows = [];
   for (const entry of services) {
-    if (!pools.has(entry.profile)) pools.set(entry.profile, citiesForProfile(extract, region, entry.profile, options));
+    if (!pools.has(entry.profile)) pools.set(entry.profile, citiesForProfile(extract, region, entry.profile));
     const pool = pools.get(entry.profile);
     const seen = used.get(entry.profile) || new Set();
     let count = 0;

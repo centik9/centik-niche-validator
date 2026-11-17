@@ -2,6 +2,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createApp } from "./app.js";
 import { HOST } from "./config.js";
+import { warmShortlistIndex } from "./shortlist-match.js";
 
 function isMain() {
   const entry = process.argv[1];
@@ -25,6 +26,7 @@ export function start() {
     ? configuredHistory.trim()
     : path.join(path.dirname(resultStorePath), "run-history.json");
   const server = createApp({ resultStorePath, historyStorePath });
+  warmShortlistIndex();
   server.listen(listenPort, HOST, () => {
     console.log(`centik-niche-validator listening on ${HOST}:${listenPort}`);
   });

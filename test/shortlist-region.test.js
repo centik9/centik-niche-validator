@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { performance } from "node:perf_hooks";
 import test from "node:test";
 import { discoverShortlist } from "../src/discovery.js";
 import { familyOf } from "../src/discovery-fixtures.js";
@@ -20,6 +21,23 @@ function expectHttp(fn, status, code) {
     return true;
   });
 }
+
+test("nationwide shortlist finishes under the client timeout", () => {
+  const started = performance.now();
+  const report = discoverShortlist({ service: "welding", region: "Any US state", mode: "example" });
+  const elapsed = performance.now() - started;
+  const states = new Set(report.rows.map((row) => row.state));
+  assert.ok(report.rows.length >= 2);
+  assert.ok(states.size >= 2);
+  assert.ok(report.rows.every((row) => /weld/i.test(row.service)));
+  assert.equal(report.paid_dataforseo_called, false);
+  assert.ok(elapsed < 2000, `nationwide took ${Math.round(elapsed)}ms`);
+  const repeatStarted = performance.now();
+  const repeat = discoverShortlist({ service: "welding", region: "any U.S. state", mode: "example" });
+  const repeatElapsed = performance.now() - repeatStarted;
+  assert.deepEqual(repeat.rows.map((row) => row.geoid), report.rows.map((row) => row.geoid));
+  assert.ok(repeatElapsed < 500, `cached nationwide took ${Math.round(repeatElapsed)}ms`);
+});
 
 test("service wording resolves trades outside the old fixture families", () => {
   assert.equal(familyOf("mobile welding"), "welding");
